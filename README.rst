@@ -37,8 +37,8 @@ and your GPG key is present::
    $ cd /tmp
    $ export GPG_FINGERPRINT=...
    $ export GPG_PASSPHRASE=...
-   $ tro-utils scan /tmp/foo/1  # creates /tmp/some_tro.jsonld that can be inspected
-   $ tro-utils scan /tmp/foo/2
+   $ tro-utils arrangement add /tmp/foo/1  # creates /tmp/some_tro.jsonld that can be inspected
+   $ tro-utils arrangement add /tmp/foo/2
    $ tro-utils sign
    $ tro-utils verify
 

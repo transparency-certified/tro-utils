@@ -100,7 +100,7 @@ class TRO:
     def get_arrangement_seq(self):
         return len(self.data["@graph"][0]["trov:hasArrangement"])
 
-    def get_composition(self):
+    def get_hash_mapping(self):
         return {
             _["trov:sha256"]: {"@id": _["@id"], "trov:mimeType": _["trov:mimeType"]}
             for _ in self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
@@ -131,7 +131,10 @@ class TRO:
             "trov:sha256": composition_fingerprint,
         }
 
-    def scan_directory(self, directory, ignore_dirs=None, comment=None):
+    def list_arrangements(self):
+        return self.data["@graph"][0]["trov:hasArrangement"]
+
+    def add_arrangement(self, directory, ignore_dirs=None, comment=None):
         if ignore_dirs is None:
             ignore_dirs = [".git"]
 
@@ -139,7 +142,7 @@ class TRO:
             comment = f"Scanned {directory}"
 
         hashes = self.sha256_for_directory(directory, ignore_dirs=ignore_dirs)
-        composition = self.get_composition()
+        composition = self.get_hash_mapping()
         i = self.get_composition_seq()
 
         magic_wrapper = magic.Magic(mime=True, uncompress=True)
@@ -246,6 +249,9 @@ class TRO:
         tsr = rt(data=tsr_payload, return_tsr=True)
         with open(self.tsr_filename, "wb") as fs:
             fs.write(encoder.encode(tsr))
+
+    def get_composition_info(self):
+        return self.data["@graph"][0]["trov:hasComposition"]
 
     def verify_timestamp(self):
         """Verify that a run is valid and signed."""
