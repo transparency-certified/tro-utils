@@ -28,6 +28,20 @@ Features
 
 * TODO
 
+HOWTO
+-----
+
+Assumes that `/tmp/foo/1` and `/tmp/foo/2` exists with some files, this package is installed 
+and your GPG key is present::
+
+   $ cd /tmp
+   $ export GPG_FINGERPRINT=...
+   $ export GPG_PASSPHRASE=...
+   $ tro-utils scan /tmp/foo/1  # creates /tmp/some_tro.jsonld that can be inspected
+   $ tro-utils scan /tmp/foo/2
+   $ tro-utils sign
+   $ tro-utils verify
+
 Credits
 -------
 
