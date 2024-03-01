@@ -1,5 +1,4 @@
 """Main module."""
-import datetime
 import hashlib
 import json
 import os
