@@ -13,6 +13,8 @@ import requests
 import rfc3161ng
 from pyasn1.codec.der import encoder
 
+from . import TRPAttribute, caps_mapping
+
 GPG_HOME = os.environ.get("GPG_HOME")
 
 
@@ -33,7 +35,14 @@ class TRO:
             self.dirname = os.path.dirname(filepath)
 
         if profile is not None and os.path.exists(profile):
+            print(f"Loading profile from {profile}")
             self.profile = json.load(open(profile))
+        else:
+            self.profile = {
+                "rdfs:comment": "Default TRS with no capabilities",
+                "trov:hasCapability": [],
+                "trov:publicKey": None,
+            }
 
         if not os.path.exists(self.tro_filename):
             self.data = {
@@ -55,17 +64,11 @@ class TRO:
                             "@type": "trov:ArtifactComposition",
                             "trov:hasArtifact": [],
                         },
-                        "trov:hasPerformance": {
-                            "@id": "trp/1",
-                            "@type": "trov:TrustedResearchPerformance",
-                            "trov:wasConductedBy": {"@id": "trs"},
-                            "trov:hadPerformanceAttribute": [],
-                        },
+                        "trov:hasPerformance": [],
                         "trov:wasAssembledBy": {
                             "@id": "trs",
                             "@type": "trov:TrustedResearchSystem",
-                            "trov:hasCapability": [],
-                            "trov:publicKey": None,
+                            **self.profile,
                         },
                     },
                 ],
@@ -310,3 +313,64 @@ class TRO:
                 tsacert_f.name,
             ]
             subprocess.check_call(args)
+
+    def add_performance(
+        self,
+        start_time,
+        end_time,
+        comment=None,
+        accessed_arrangement=None,
+        modified_arrangement=None,
+        caps=None,
+    ):
+        trp = {
+            "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
+            "@type": "trov:TrustedResearchPerformance",
+            "rdfs:comment": comment or "Some performance",
+            "trov:wasCoductedBy": {"@id": "trs"},
+            "trov:hasPerformanceAttribute": [],
+            "trov:startedAtTime": start_time.isoformat(),
+            "trov:endedAtTime": end_time.isoformat(),
+        }
+
+        available_arrangements = [
+            _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]
+        ]
+
+        if accessed_arrangement:
+            # check if the arrangement exists
+            if accessed_arrangement not in available_arrangements:
+                raise ValueError(
+                    f"Arrangement {accessed_arrangement} does not exist. "
+                    f"Available arrangements: {available_arrangements}"
+                )
+            trp["trov:accessedArrangement"] = {"@id": accessed_arrangement}
+
+        if modified_arrangement:
+            # check if the arrangement exists
+            if modified_arrangement not in available_arrangements:
+                raise ValueError(
+                    f"Arrangement {modified_arrangement} does not exist. "
+                    f"Available arrangements: {available_arrangements}"
+                )
+            trp["trov:contributedToArrangement"] = {"@id": modified_arrangement}
+
+        trs_caps = {
+            _["@type"]: _["@id"]
+            for _ in self.data["@graph"][0]["trov:wasAssembledBy"]["trov:hasCapability"]
+        }
+
+        i = 0
+        for cap in caps:
+            assert cap in [TRPAttribute.RECORD_NETWORK, TRPAttribute.ISOLATION]
+            assert caps_mapping[cap] in trs_caps
+            trp["trov:hasPerformanceAttribute"].append(
+                {
+                    "@id": f"{trp['@id']}/attribute/{i}",
+                    "@type": cap,
+                    "trov:warrantedBy": {"@id": trs_caps[caps_mapping[cap]]},
+                }
+            )
+            i += 1
+
+        self.data["@graph"][0]["trov:hasPerformance"].append(trp)

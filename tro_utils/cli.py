@@ -3,6 +3,7 @@ import sys
 
 import click
 
+from . import TRPAttribute
 from .tro_utils import TRO
 
 
@@ -14,7 +15,11 @@ from .tro_utils import TRO
     help="Path to the TRO declaration file",
 )
 @click.option(
-    "--profile", type=click.Path(), required=False, help="Path to the TRS profile file"
+    "--profile",
+    envvar="TRS_PROFILE",
+    type=click.Path(),
+    required=False,
+    help="Path to the TRS profile file",
 )
 @click.option(
     "--gpg-fingerprint",
@@ -60,11 +65,16 @@ def composition():
     pass
 
 
+@cli.group(help="Manage perfomances in the TRO")
+def performance():
+    pass
+
+
 @composition.command(help="Get info about current composition")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
 @click.pass_context
 def info(ctx, verbose):
-    declaration = ctx.parent.params.get("declaration")
+    declaration = ctx.parent.parent.params.get("declaration")
     tro = TRO(
         filepath=declaration,
     )
@@ -95,10 +105,11 @@ def info(ctx, verbose):
 @click.argument("directory", type=click.Path(exists=True))
 @click.pass_context
 def add(ctx, directory, ignore_dir, comment):
-    declaration = ctx.parent.params.get("declaration")
-    gpg_fingerprint = ctx.parent.params.get("gpg_fingerprint")
-    gpg_passphrase = ctx.parent.params.get("gpg_passphrase")
-    profile = ctx.parent.params.get("profile")
+    ctx = ctx.parent.parent
+    declaration = ctx.params.get("declaration")
+    gpg_fingerprint = ctx.params.get("gpg_fingerprint")
+    gpg_passphrase = ctx.params.get("gpg_passphrase")
+    profile = ctx.params.get("profile")
     tro = TRO(
         filepath=declaration,
         gpg_fingerprint=gpg_fingerprint,
@@ -113,7 +124,7 @@ def add(ctx, directory, ignore_dir, comment):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
 @click.pass_context
 def list(ctx, verbose):
-    declaration = ctx.parent.params.get("declaration")
+    declaration = ctx.parent.parent.params.get("declaration")
     tro = TRO(
         filepath=declaration,
     )
@@ -139,6 +150,67 @@ def sign(ctx):
         profile=profile,
     )
     tro.get_timestamp()
+
+
+@performance.command(help="Add performance to the TRO", name="add")
+@click.option(
+    "--comment",
+    "-m",
+    type=click.STRING,
+    required=False,
+    help="Description of the performance",
+)
+@click.option(
+    "--start",
+    "-s",
+    type=click.DateTime(),
+    required=False,
+    help="Start time of the performance",
+)
+@click.option(
+    "--end",
+    "-e",
+    type=click.DateTime(),
+    required=False,
+    help="End time of the performance",
+)
+@click.option(
+    "--caps",
+    "-c",
+    type=click.Choice([TRPAttribute.ISOLATION, TRPAttribute.RECORD_NETWORK]),
+    required=False,
+    multiple=True,
+    help="Capabilities of the performance",
+)
+@click.option(
+    "--accessed", "-a", type=click.STRING, required=False, help="Accessed Arrangement"
+)
+@click.option(
+    "--modified", "-M", type=click.STRING, required=False, help="Modified Arrangement"
+)
+@click.pass_context
+def performance_add(ctx, comment, start, end, caps, accessed, modified):
+    ctx = ctx.parent.parent
+    declaration = ctx.params.get("declaration")
+    gpg_fingerprint = ctx.params.get("gpg_fingerprint")
+    gpg_passphrase = ctx.params.get("gpg_passphrase")
+    profile = ctx.params.get("profile")
+    click.echo(f"PROFILE {profile}")
+    tro = TRO(
+        filepath=declaration,
+        gpg_fingerprint=gpg_fingerprint,
+        gpg_passphrase=gpg_passphrase,
+        profile=profile,
+    )
+    tro.add_performance(
+        start,
+        end,
+        comment=comment,
+        accessed_arrangement=accessed,
+        modified_arrangement=modified,
+        caps=caps,
+    )
+    tro.save()
 
 
 if __name__ == "__main__":
