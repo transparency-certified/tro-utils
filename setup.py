@@ -12,6 +12,10 @@ with open("HISTORY.rst") as history_file:
 
 requirements = [
     "Click>=7.0",
+    "requests",
+    "python-gnupg",
+    "python-magic",
+    "rfc3161ng",
 ]
 
 test_requirements = [
