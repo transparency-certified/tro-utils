@@ -149,7 +149,7 @@ def sign(ctx):
         gpg_passphrase=gpg_passphrase,
         profile=profile,
     )
-    tro.get_timestamp()
+    tro.request_timestamp()
 
 
 @performance.command(help="Add performance to the TRO", name="add")
@@ -195,7 +195,6 @@ def performance_add(ctx, comment, start, end, caps, accessed, modified):
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
     gpg_passphrase = ctx.params.get("gpg_passphrase")
     profile = ctx.params.get("profile")
-    click.echo(f"PROFILE {profile}")
     tro = TRO(
         filepath=declaration,
         gpg_fingerprint=gpg_fingerprint,

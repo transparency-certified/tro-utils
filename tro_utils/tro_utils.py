@@ -184,20 +184,6 @@ class TRO:
             )
             i += 1
         self.data["@graph"][0]["trov:hasArrangement"].append(arrangement)
-        if arrangement_id.endswith("0"):
-            self.data["@graph"][0]["trov:hasPerformance"].update(
-                {
-                    "trov:accessedArrangement": {"@id": arrangement_id},
-                    "trov:startedAtTime": datetime.datetime.now().isoformat(),
-                }
-            )
-        else:
-            self.data["@graph"][0]["trov:hasPerformance"].update(
-                {
-                    "trov:modifiedArrangement": {"@id": arrangement_id},
-                    "trov:endedAtTime": datetime.datetime.now().isoformat(),
-                }
-            )
 
     def save(self):
         with open(self.tro_filename, "w") as f:
@@ -238,7 +224,8 @@ class TRO:
             fp.write(str(signature))
         return signature
 
-    def get_timestamp(self):
+    def request_timestamp(self):
+        """Request a timestamp from a remote TSA and store the result in a file."""
         rt = rfc3161ng.RemoteTimestamper("https://freetsa.org/tsr", hashname="sha512")
         ts_data = {
             "tro_declaration": hashlib.sha512(
