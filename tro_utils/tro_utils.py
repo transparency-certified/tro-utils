@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 import gnupg
+from jinja2 import Template
 import magic
 import requests
 import rfc3161ng
@@ -360,3 +361,87 @@ class TRO:
             i += 1
 
         self.data["@graph"][0]["trov:hasPerformance"].append(trp)
+
+    def generate_report(self, template, report):
+        graph = self.data["@graph"][0]
+        trs = graph["trov:wasAssembledBy"]
+        composition = {
+            obj["@id"]: obj for obj in graph["trov:hasComposition"]["trov:hasArtifact"]
+        }
+        arrangements = {}
+        for arr in self.data["@graph"][0]["trov:hasArrangement"]:
+            artifacts = {
+                obj["trov:hasLocation"]: {
+                    "sha256": composition[obj["trov:hasArtifact"]["@id"]][
+                        "trov:sha256"
+                    ],
+                    "excluded": obj.get("trov:excluded", "None"),
+                    "createdBy": obj.get("trov:createdBy", "trs"),
+                }
+                for obj in arr["trov:hasLocus"]
+            }
+
+            arrangements[arr["@id"]] = {
+                "name": arr["rdfs:comment"],
+                "artifacts": artifacts,
+            }
+
+        # Detect changes between arrangements
+        # Which files were added? Which files changed? Which files
+        # were removed?  Which files were added by the system
+        # (.docker_stats, etc)? Which by the researcher?
+        keys = list(arrangements.keys())
+        for location in arrangements[keys[1]]["artifacts"]:
+            if location in arrangements[keys[0]]["artifacts"]:
+                if (
+                    arrangements[keys[1]]["artifacts"][location]["sha256"]
+                    != arrangements[keys[0]]["artifacts"][location]["sha256"]
+                ):
+                    arrangements[keys[1]]["artifacts"][location]["status"] = "Changed"
+                else:
+                    arrangements[keys[1]]["artifacts"][location]["status"] = "Unchanged"
+            else:
+                arrangements[keys[1]]["artifacts"][location]["status"] = "Added"
+
+        data = {
+            "name": graph["trov:name"],
+            "description": graph["trov:description"],
+            "createdBy": graph["trov:createdBy"],
+            "createdDate": graph["trov:createdDate"],
+            "trs": {
+                "publicKey": trs["trov:publicKey"],
+                "comment": trs["rdfs:comment"],
+                "owner": trs.get("trov:owner", ""),
+                "description": trs["trov:description"],
+                "contact": trs.get("trov:contact", ""),
+                "url": trs.get("trov:url", ""),
+                "capabilities": [
+                    {
+                        "name": _["trov:name"],
+                        "description": _.get("trov:description", ""),
+                    }
+                    for _ in trs["trov:hasCapability"]
+                ],
+            },
+            "trps": [
+                {
+                    "id": trp["@id"],
+                    "started": trp["trov:startedAtTime"],
+                    "ended": trp["trov:endedAtTime"],
+                    "accessed": arrangements[
+                        trp.get("trov:accessedArrangement", {"@id": ""})["@id"]
+                    ]["name"],
+                    "contributed": arrangements[
+                        trp.get("trov:modifiedArrangement", {"@id": ""})["@id"]
+                    ]["name"],
+                    "description": trp.get("rdfs:comment", ""),
+                }
+                for trp in graph["trov:hasPerformance"]
+            ],
+            "arrangements": arrangements,
+        }
+        with open(template) as file_:
+            template = Template(file_.read())
+
+        with open(report, "w") as fh:
+            fh.write(template.render(tro=data))

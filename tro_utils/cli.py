@@ -152,6 +152,20 @@ def sign(ctx):
     tro.request_timestamp()
 
 
+@cli.command(help="Generate a report of the TRO")
+@click.option(
+    "--template", "-t", type=click.Path(), required=True, help="Template file"
+)
+@click.option("--output", "-o", type=click.Path(), required=True, help="Output file")
+@click.pass_context
+def generate_report(ctx, template, output):
+    declaration = ctx.parent.params.get("declaration")
+    tro = TRO(
+        filepath=declaration,
+    )
+    tro.generate_report(template, output)
+
+
 @performance.command(help="Add performance to the TRO", name="add")
 @click.option(
     "--comment",
