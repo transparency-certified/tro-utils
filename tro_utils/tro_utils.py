@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import tempfile
 
+import datetime
 import gnupg
 from jinja2 import Template
 import magic
@@ -25,7 +26,14 @@ class TRO:
     profile = None
 
     def __init__(
-        self, filepath=None, gpg_fingerprint=None, gpg_passphrase=None, profile=None
+        self,
+        filepath=None,
+        gpg_fingerprint=None,
+        gpg_passphrase=None,
+        profile=None,
+        tro_creator=None,
+        tro_name=None,
+        tro_description=None,
     ):
         if filepath is None:
             self.basename = "some_tro"
@@ -57,6 +65,9 @@ class TRO:
                     {
                         "@id": "tro",
                         "@type": "trov:TransparentResearchObject",
+                        "trov:createdBy": tro_creator or "TRO utils",
+                        "trov:name": tro_name or "Some TRO",
+                        "trov:description": tro_description or "Some description",
                         "trov:hasArrangement": [],
                         "trov:hasAttribute": [],
                         "trov:hasComposition": {
@@ -78,6 +89,9 @@ class TRO:
         self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
         if gpg_fingerprint:
             self.gpg_key_id = self.gpg.list_keys().key_map[gpg_fingerprint]["keyid"]
+            self.data["@graph"][0]["trov:wasAssembledBy"][
+                "trov:publicKey"
+            ] = self.gpg.export_keys(self.gpg_key_id)
         if gpg_passphrase:
             self.gpg_passphrase = gpg_passphrase
 
@@ -214,6 +228,7 @@ class TRO:
             raise RuntimeError("GPG fingerprint was not provided")
         if self.gpg_passphrase is None:
             raise RuntimeError("GPG passphrase was not provided")
+        self.data["@graph"][0]["trov:createdDate"] = datetime.datetime.now().isoformat()
         signature = self.gpg.sign(
             json.dumps(self.data, indent=2, sort_keys=True),
             keyid=self.gpg_key_id,
@@ -406,20 +421,21 @@ class TRO:
                 arrangements[keys[1]]["artifacts"][location]["status"] = "Added"
 
         data = {
-            "name": graph["trov:name"],
-            "description": graph["trov:description"],
-            "createdBy": graph["trov:createdBy"],
-            "createdDate": graph["trov:createdDate"],
+            "name": graph.get("trov:name", "Some Name"),
+            "description": graph.get("trov:description", "Some Description"),
+            "createdBy": graph.get("trov:createdBy", "Somebody"),
+            "createdDate": graph.get("trov:createdDate", "Some day"),
             "trs": {
-                "publicKey": trs["trov:publicKey"],
+                "publicKey": trs.get("trov:publicKey"),
+                "name": trs.get("trov:name", ""),
                 "comment": trs["rdfs:comment"],
                 "owner": trs.get("trov:owner", ""),
-                "description": trs["trov:description"],
+                "description": trs.get("trov:description", ""),
                 "contact": trs.get("trov:contact", ""),
                 "url": trs.get("trov:url", ""),
                 "capabilities": [
                     {
-                        "name": _["trov:name"],
+                        "name": _.get("trov:name", _["@type"]),
                         "description": _.get("trov:description", ""),
                     }
                     for _ in trs["trov:hasCapability"]
@@ -434,7 +450,7 @@ class TRO:
                         trp.get("trov:accessedArrangement", {"@id": ""})["@id"]
                     ]["name"],
                     "contributed": arrangements[
-                        trp.get("trov:modifiedArrangement", {"@id": ""})["@id"]
+                        trp.get("trov:contributedToArrangement", {"@id": ""})["@id"]
                     ]["name"],
                     "description": trp.get("rdfs:comment", ""),
                 }

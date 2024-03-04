@@ -35,7 +35,36 @@ from .tro_utils import TRO
     required=False,
     help="GPG passphrase for signing TRO",
 )
-def cli(declaration, profile, gpg_fingerprint, gpg_passphrase):
+@click.option(
+    "--tro-creator",
+    envvar="TRO_CREATOR",
+    type=click.STRING,
+    required=False,
+    help="TRO creator (only used when creating a new TRO)",
+)
+@click.option(
+    "--tro-name",
+    envvar="TRO_NAME",
+    type=click.STRING,
+    required=False,
+    help="TRO name (only used when creating a new TRO)",
+)
+@click.option(
+    "--tro-description",
+    envvar="TRO_DESCRIPTION",
+    type=click.STRING,
+    required=False,
+    help="TRO description (only used when creating a new TRO)",
+)
+def cli(
+    declaration,
+    profile,
+    gpg_fingerprint,
+    gpg_passphrase,
+    tro_creator,
+    tro_name,
+    tro_description,
+):
     pass
 
 
@@ -110,11 +139,17 @@ def add(ctx, directory, ignore_dir, comment):
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
     gpg_passphrase = ctx.params.get("gpg_passphrase")
     profile = ctx.params.get("profile")
+    tro_name = ctx.params.get("tro_name")
+    tro_description = ctx.params.get("tro_description")
+    tro_creator = ctx.params.get("tro_creator")
     tro = TRO(
         filepath=declaration,
         gpg_fingerprint=gpg_fingerprint,
         gpg_passphrase=gpg_passphrase,
         profile=profile,
+        tro_creator=tro_creator,
+        tro_name=tro_name,
+        tro_description=tro_description,
     )
     tro.add_arrangement(directory, ignore_dirs=ignore_dir, comment=comment)
     tro.save()
@@ -152,7 +187,7 @@ def sign(ctx):
     tro.request_timestamp()
 
 
-@cli.command(help="Generate a report of the TRO")
+@cli.command(help="Generate a report of the TRO", name="report")
 @click.option(
     "--template", "-t", type=click.Path(), required=True, help="Template file"
 )
