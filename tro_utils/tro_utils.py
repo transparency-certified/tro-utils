@@ -378,7 +378,9 @@ class TRO:
                     "excluded": obj.get("trov:excluded", "None"),
                     "createdBy": obj.get("trov:createdBy", "trs"),
                 }
-                for obj in arr["trov:hasLocus"]
+                for obj in sorted(
+                    arr["trov:hasLocus"], key=lambda x: x["trov:hasLocation"]
+                )
             }
 
             arrangements[arr["@id"]] = {
@@ -440,6 +442,7 @@ class TRO:
             ],
             "arrangements": arrangements,
         }
+
         with open(template) as file_:
             template = Template(file_.read())
 
