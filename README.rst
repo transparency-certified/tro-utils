@@ -2,7 +2,6 @@
 Transparent Research Object utils
 =================================
 
-
 .. image:: https://img.shields.io/pypi/v/tro_utils.svg
         :target: https://pypi.python.org/pypi/tro_utils
 
@@ -13,23 +12,31 @@ Transparent Research Object utils
         :target: https://tro-utils.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
 
+This package provides a set of utilities for working with Transparent Research Objects (TROs). It is designed to be used in
+conjunction with the `TRO specification <https://transparency-certified.github.io/trace-specification/docs/specifications/tro/0.1/index.html>`_.
 
+It uses the `Click` library to define commands and options. Here's a summary of the main features:
 
+1. **Global Options**: The script defines several global options that can be used with any command,
+   such as `--declaration`, `--profile`, `--gpg-fingerprint`, `--gpg-passphrase`, `--tro-creator`,
+   `--tro-name`, and `--tro-description`. These options can be used to specify various parameters for the TRO.
 
-Utilities for creating, editing and interacting with TROs
+1. **Commands**: The script defines several commands, each with its own set of options and arguments. The commands include:
 
+    * `verify`: Verifies that the TRO is signed and timestamped correctly.
+    * `arrangement`: Manages arrangements in the TRO. It has subcommands like `add`` (adds a directory as a composition to the TRO)
+       and `list`` (lists available arrangements in the TRO).
+    * `composition`: Manages compositions in the TRO. It has a subcommand `info` that gets info about the current composition.
+    * `performance`: Manages performances in the TRO. It has a subcommand `add` that adds a performance to the TRO.
+    * `sign``: Signs the TRO.
+    * `report``: Generates a report of the TRO.
 
-* Free software: BSD license
-* Documentation: https://tro-utils.readthedocs.io.
+1. **TRO Interaction**: The script interacts with the TRO using the `TRO` class from the `tro_utils` module.
+   It uses this class to create a new TRO, add arrangements and performances to the TRO, verify the TRO,
+   and generate a report of the TRO.
 
-
-Features
---------
-
-* TODO
-
-HOWTO
------
+Example Usage
+-------------
 
 Assumes that:
 
