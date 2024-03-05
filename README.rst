@@ -99,8 +99,7 @@ Example workflow::
      -M arrangement/1
     $ tro-utils --declaration sample_tro.jsonld sign
     $ tro-utils --declaration sample_tro.jsonld verify
-      Using configuration from /usr/lib/ssl/openssl.cnf
-      Warning: certificate from '/tmp/tmpsew5qrk8' with subject '/O=Free TSA/OU=TSA/description=This certificate digitally signs documents and time stamp requests made using the freetsa.org online services/CN=www.freetsa.org/emailAddress=busilezas@gmail.com/L=Wuerzburg/C=DE/ST=Bayern' is not a CA cert
+      ...
       Verification: OK
     $ curl -LO https://raw.githubusercontent.com/craig-willis/trace-report/main/templates/tro.md.jinja2
     $ tro-utils --declaration sample_tro.jsonld report --template tro.md.jinja2 -o report.md
