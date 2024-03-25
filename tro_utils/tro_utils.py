@@ -12,6 +12,7 @@ from jinja2 import Template
 import magic
 import requests
 import rfc3161ng
+import graphviz
 from pyasn1.codec.der import encoder
 
 from . import TRPAttribute, caps_mapping
@@ -47,7 +48,7 @@ class TRO:
             self.profile = json.load(open(profile))
         else:
             self.profile = {
-                "rdfs:comment": "Default TRS with no capabilities",
+                "schema:description": "Default TRS with no capabilities",
                 "trov:hasCapability": [],
                 "trov:publicKey": None,
             }
@@ -59,15 +60,17 @@ class TRO:
                         "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
                         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
                         "trov": "https://w3id.org/trace/2023/05/trov#",
+                        "schema": "https://schema.org"
                     }
                 ],
                 "@graph": [
                     {
                         "@id": "tro",
-                        "@type": "trov:TransparentResearchObject",
-                        "trov:createdBy": tro_creator or "TRO utils",
-                        "trov:name": tro_name or "Some TRO",
-                        "trov:description": tro_description or "Some description",
+                        "@type": ["trov:TransparentResearchObject", "schema:CreativeWork"],
+                        "schema:creator": tro_creator or "TRO utils",
+                        "schema:name": tro_name or "Some TRO",
+                        "schema:description": tro_description or "Some description",
+                        "schema:dateCreated": datetime.datetime.now().isoformat(),
                         "trov:hasArrangement": [],
                         "trov:hasAttribute": [],
                         "trov:hasComposition": {
@@ -78,7 +81,7 @@ class TRO:
                         "trov:hasPerformance": [],
                         "trov:wasAssembledBy": {
                             "@id": "trs",
-                            "@type": "trov:TrustedResearchSystem",
+                            "@type": ["trov:TrustedResearchSystem", "schema:Organization"],
                             **self.profile,
                         },
                     },
@@ -228,7 +231,6 @@ class TRO:
             raise RuntimeError("GPG fingerprint was not provided")
         if self.gpg_passphrase is None:
             raise RuntimeError("GPG passphrase was not provided")
-        self.data["@graph"][0]["trov:createdDate"] = datetime.datetime.now().isoformat()
         signature = self.gpg.sign(
             json.dumps(self.data, indent=2, sort_keys=True),
             keyid=self.gpg_key_id,
@@ -390,8 +392,8 @@ class TRO:
                     "sha256": composition[obj["trov:hasArtifact"]["@id"]][
                         "trov:sha256"
                     ],
-                    "excluded": obj.get("trov:excluded", "None"),
-                    "createdBy": obj.get("trov:createdBy", "trs"),
+                    "creator": obj.get("schema:creator", "trs"),
+                    "createdDate": obj.get("schema:createdDate", "None"),
                 }
                 for obj in sorted(
                     arr["trov:hasLocus"], key=lambda x: x["trov:hasLocation"]
@@ -403,36 +405,59 @@ class TRO:
                 "artifacts": artifacts,
             }
 
+        # Graphviz!
+        dot = graphviz.Digraph("TRO")
+        dot.graph_attr["rankdir"] = "LR"
+        dot.attr("edge", color="black")
+        dot.graph_attr["dpi"] = "200"
+
+        dot.attr("node", shape="box", style="filled, rounded", fillcolor="#FFFFD1")
+        for arrangement in arrangements:
+            dot.node(arrangements[arrangement]["name"])
+
+        dot.attr("node", shape="box3d", style="filled, rounded", fillcolor="#D6FDD0")
+
+        for trp in graph["trov:hasPerformance"]:
+            description = trp["rdfs:comment"]
+            accessed = arrangements[trp["trov:accessedArrangement"]["@id"]]["name"]
+            contributed = arrangements[trp["trov:contributedToArrangement"]["@id"]]["name"]
+            dot.node(description)
+            dot.edge(accessed, description)
+            dot.edge(description, contributed)
+
+        dot.render("workflow", ".", cleanup=True, format="png")
+
         # Detect changes between arrangements
-        # Which files were added? Which files changed? Which files
-        # were removed?  Which files were added by the system
-        # (.docker_stats, etc)? Which by the researcher?
+        # Which files were added? Which files changed?
+        # Which files were removed?
         keys = list(arrangements.keys())
-        for location in arrangements[keys[1]]["artifacts"]:
-            if location in arrangements[keys[0]]["artifacts"]:
-                if (
-                    arrangements[keys[1]]["artifacts"][location]["sha256"]
-                    != arrangements[keys[0]]["artifacts"][location]["sha256"]
-                ):
-                    arrangements[keys[1]]["artifacts"][location]["status"] = "Changed"
+
+        for n in reversed(range(1, len(keys))):
+            for location in arrangements[keys[n]]["artifacts"]:
+                if location in arrangements[keys[n-1]]["artifacts"]:
+                    if (
+                        arrangements[keys[n]]["artifacts"][location]["sha256"]
+                        != arrangements[keys[n-1]]["artifacts"][location]["sha256"]
+                    ):
+                        arrangements[keys[n]]["artifacts"][location]["status"] = "Changed"
+                    else:
+                        arrangements[keys[n]]["artifacts"][location]["status"] = "Unchanged"
                 else:
-                    arrangements[keys[1]]["artifacts"][location]["status"] = "Unchanged"
-            else:
-                arrangements[keys[1]]["artifacts"][location]["status"] = "Added"
+                    arrangements[keys[n]]["artifacts"][location]["status"] = "Created"
 
         data = {
-            "name": graph.get("trov:name", "Some Name"),
-            "description": graph.get("trov:description", "Some Description"),
-            "createdBy": graph.get("trov:createdBy", "Somebody"),
-            "createdDate": graph.get("trov:createdDate", "Some day"),
+            "name": graph.get("schema:name", "No name provided"),
+            "description": graph.get("schema:description", "No Description provided"),
+            "creator": graph.get("schema:creator", "No creator provided"),
+            "dateCreated": graph.get("schema:dateCreated", "No date provided"),
             "trs": {
                 "publicKey": trs.get("trov:publicKey"),
-                "name": trs.get("trov:name", ""),
+                "name": trs.get("schema:name", ""),
                 "comment": trs["rdfs:comment"],
-                "owner": trs.get("trov:owner", ""),
-                "description": trs.get("trov:description", ""),
-                "contact": trs.get("trov:contact", ""),
-                "url": trs.get("trov:url", ""),
+                "publisher": trs.get("schema:publisher", ""),
+                "description": trs.get("schema:description", ""),
+                "email": trs.get("schema:email", ""),
+                "url": trs.get("schema:url", ""),
                 "capabilities": [
                     {
                         "name": _.get("trov:name", _["@type"]),

@@ -21,6 +21,7 @@ dependencies = [
   "python-gnupg",
   "python-magic",
   "rfc3161ng",
+  "graphviz",
 ]
 requires-python = ">= 3.8"
 license = {file = "LICENSE"}
