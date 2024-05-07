@@ -3,10 +3,10 @@ Transparent Research Object utils
 =================================
 
 .. image:: https://img.shields.io/pypi/v/tro_utils.svg
-        :target: https://pypi.python.org/pypi/tro_utils
+        :target: https://pypi.python.org/pypi/tro-utils
 
-.. image:: https://img.shields.io/travis/Xarthisius/tro_utils.svg
-        :target: https://travis-ci.com/Xarthisius/tro_utils
+.. image:: https://img.shields.io/travis/transparency-certified/tro-utils.svg
+        :target: https://travis-ci.com/transparency-certified/tro-utils
 
 .. image:: https://readthedocs.org/projects/tro-utils/badge/?version=latest
         :target: https://tro-utils.readthedocs.io/en/latest/?version=latest
