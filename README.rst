@@ -5,8 +5,8 @@ Transparent Research Object utils
 .. image:: https://img.shields.io/pypi/v/tro_utils.svg
         :target: https://pypi.python.org/pypi/tro-utils
 
-.. image:: https://img.shields.io/travis/transparency-certified/tro-utils.svg
-        :target: https://travis-ci.com/transparency-certified/tro-utils
+.. image:: https://zenodo.org/badge/765298086.svg
+        :target: https://zenodo.org/doi/10.5281/zenodo.11130420
 
 .. image:: https://readthedocs.org/projects/tro-utils/badge/?version=latest
         :target: https://tro-utils.readthedocs.io/en/latest/?version=latest
