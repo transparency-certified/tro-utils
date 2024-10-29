@@ -39,3 +39,6 @@ classifiers = [
 
 [project.scripts]
 tro-utils = "tro_utils.cli:cli"
+
+[tool.setuptools.package-data]
+tro_utils = ["*.jinja2"]
