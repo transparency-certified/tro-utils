@@ -1,10 +1,42 @@
 """Console script for tro_utils."""
+import os
 import sys
 
 import click
 
 from . import TRPAttribute
 from .tro_utils import TRO
+
+_TEMPLATES = {
+    "default": {
+        "description": "Default pretty template by Craig Willis",
+        "filename": "default.jinja2",
+    },
+}
+
+
+class StringOrPath(click.ParamType):
+    """Custom parameter type to accept either a valid string or a file path."""
+
+    name = "string_or_path"
+
+    def __init__(self, templates=None):
+        self.valid_strings = templates.keys()
+
+    def convert(self, value, param, ctx):
+        # Check if the value is in the allowed string set
+        if value in self.valid_strings:
+            return value
+        # Check if the value is a valid path
+        elif os.path.exists(value) and os.path.isfile(value):
+            return value
+        else:
+            self.fail(
+                f"'{value}' is neither a valid option ({', '.join(self.valid_strings)}) "
+                f"nor a valid file path.",
+                param,
+                ctx,
+            )
 
 
 @click.group()
@@ -189,12 +221,20 @@ def sign(ctx):
 
 @cli.command(help="Generate a report of the TRO", name="report")
 @click.option(
-    "--template", "-t", type=click.Path(), required=True, help="Template file"
+    "--template",
+    "-t",
+    type=StringOrPath(_TEMPLATES),
+    required=True,
+    help=f"Template file or one of the following: {', '.join(_TEMPLATES.keys())}",
 )
 @click.option("--output", "-o", type=click.Path(), required=True, help="Output file")
 @click.pass_context
 def generate_report(ctx, template, output):
     declaration = ctx.parent.params.get("declaration")
+    if template in _TEMPLATES:
+        template = os.path.join(
+            os.path.dirname(__file__), _TEMPLATES[template]["filename"]
+        )
     tro = TRO(
         filepath=declaration,
     )

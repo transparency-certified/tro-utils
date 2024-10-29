@@ -57,3 +57,6 @@ dev = [
     "Sphinx>=1.8.5",
     "twine>=1.14.0",
 ]
+
+[tool.setuptools.package-data]
+tro_utils = ["*.jinja2"]
