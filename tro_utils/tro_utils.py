@@ -429,6 +429,8 @@ class TRO:
 
         dot.attr("node", shape="box3d", style="filled, rounded", fillcolor="#D6FDD0")
 
+        if isinstance(graph["trov:hasPerformance"], dict):
+            graph["trov:hasPerformance"] = [graph["trov:hasPerformance"]]
         for trp in graph["trov:hasPerformance"]:
             description = trp["rdfs:comment"]
             accessed = arrangements[trp["trov:accessedArrangement"]["@id"]]["name"]
