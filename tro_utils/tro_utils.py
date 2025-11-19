@@ -154,14 +154,18 @@ class TRO:
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
-    def add_arrangement(self, directory, ignore_dirs=None, comment=None):
+    def add_arrangement(
+        self, directory, ignore_dirs=None, comment=None, resolve_symlinks=True
+    ):
         if ignore_dirs is None:
             ignore_dirs = [".git"]
 
         if comment is None:
             comment = f"Scanned {directory}"
 
-        hashes = self.sha256_for_directory(directory, ignore_dirs=ignore_dirs)
+        hashes = self.sha256_for_directory(
+            directory, ignore_dirs=ignore_dirs, resolve_symlinks=resolve_symlinks
+        )
         composition = self.get_hash_mapping()
         i = self.get_composition_seq()
 
@@ -170,10 +174,13 @@ class TRO:
         for filepath, hash_value in hashes.items():
             if hash_value in composition:
                 continue
+            if os.path.islink(filepath):
+                mime_type = "inode/symlink"
+            else:
+                mime_type = magic_wrapper.from_file(filepath) or "application/octet-stream"
             composition[hash_value] = {
                 "@id": f"composition/1/artifact/{i}",
-                "trov:mimeType": magic_wrapper.from_file(filepath)
-                or "application/octet-stream",
+                "trov:mimeType": mime_type
             }
             i += 1
 
@@ -207,14 +214,16 @@ class TRO:
             json.dump(self.data, f, indent=2, sort_keys=True)
 
     @staticmethod
-    def sha256_for_file(filepath):
+    def sha256_for_file(filepath, resolve_symlinks=True):
         sha256 = hashlib.sha256()
+        if not os.path.isfile(filepath) or os.path.islink(filepath):
+            return ""
         with open(filepath, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def sha256_for_directory(self, directory, ignore_dirs=None):
+    def sha256_for_directory(self, directory, ignore_dirs=None, resolve_symlinks=True):
         if ignore_dirs is None:
             ignore_dirs = [".git"]  # Default ignore list
         hashes = {}
@@ -222,7 +231,7 @@ class TRO:
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for filename in files:
                 filepath = os.path.join(root, filename)
-                hash_value = self.sha256_for_file(filepath)
+                hash_value = self.sha256_for_file(filepath, resolve_symlinks=resolve_symlinks)
                 hashes[filepath] = hash_value
         return hashes
 
