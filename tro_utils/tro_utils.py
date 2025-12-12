@@ -335,16 +335,19 @@ class TRO:
         accessed_arrangement=None,
         modified_arrangement=None,
         caps=None,
+        extra_attributes=None,
     ):
         trp = {
             "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
             "@type": "trov:TrustedResearchPerformance",
             "rdfs:comment": comment or "Some performance",
-            "trov:wasCoductedBy": {"@id": "trs"},
+            "trov:wasConductedBy": {"@id": "trs"},
             "trov:hasPerformanceAttribute": [],
             "trov:startedAtTime": start_time.isoformat(),
             "trov:endedAtTime": end_time.isoformat(),
         }
+        if extra_attributes and isinstance(extra_attributes, dict):
+            trp.update(extra_attributes)
 
         available_arrangements = [
             _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]
