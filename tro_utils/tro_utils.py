@@ -340,7 +340,7 @@ class TRO:
             "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
             "@type": "trov:TrustedResearchPerformance",
             "rdfs:comment": comment or "Some performance",
-            "trov:wasCoductedBy": {"@id": "trs"},
+            "trov:wasConductedBy": {"@id": "trs"},
             "trov:hasPerformanceAttribute": [],
             "trov:startedAtTime": start_time.isoformat(),
             "trov:endedAtTime": end_time.isoformat(),
