@@ -335,6 +335,7 @@ class TRO:
         accessed_arrangement=None,
         modified_arrangement=None,
         caps=None,
+        extra_attributes=None,
     ):
         trp = {
             "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
@@ -345,6 +346,8 @@ class TRO:
             "trov:startedAtTime": start_time.isoformat(),
             "trov:endedAtTime": end_time.isoformat(),
         }
+        if extra_attributes and isinstance(extra_attributes, dict):
+            trp.update(extra_attributes)
 
         available_arrangements = [
             _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]
