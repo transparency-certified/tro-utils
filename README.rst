@@ -17,13 +17,15 @@ conjunction with the `TRO specification <https://transparency-certified.github.i
 
 It uses the ``Click`` library to define commands and options. Here's a summary of the main features:
 
+1. **Basic command**: ``tro-utils [OPTIONS] [DECLARATION] COMMAND [ARGS]...``
+
 1. **Global Options**: The script defines several global options that can be used with any command,
-   such as ``--declaration``, ``--profile``, ``--gpg-fingerprint``, ``--gpg-passphrase``, ``--tro-creator``,
-   ``--tro-name``, and ``--tro-description``. These options can be used to specify various parameters for the TRO.
+   such as ``--declaration`` (optional), ``--profile``, ``--gpg-fingerprint``, ``--gpg-passphrase``. These options can be used to specify various parameters for the TRO. ``[DECLARATION]`` is a path to the TRO declaration file, and can be provided as a positional argument or via the ``--declaration`` option.
 
 1. **Commands**: The script defines several commands, each with its own set of options and arguments. The commands include:
 
-   - ``verify``: Verifies that the TRO is signed and timestamped correctly.
+   - ``create``: Creates a new TRO 
+     - Arguments:  ``--tro-creator``,    ``--tro-name``, and ``--tro-description``.
 
    - ``arrangement``: Manages arrangements in the TRO. It has subcommands like ``add`` (adds a directory as a composition to the TRO)
      and ``list`` (lists available arrangements in the TRO).
@@ -34,11 +36,24 @@ It uses the ``Click`` library to define commands and options. Here's a summary o
 
    - ``sign``: Signs the TRO.
 
+   - ``verify-signature``: Verifies that the TRO is signed and timestamped correctly.
+
+   - ``verify``: Verifies that a particular arrangement is consistent with files (or ZIP) on disk. 
+     - Arguments: ``--arrangement``: number of the particular arrangement to check, ``--path``: to the on-disk directory, ZIP, or Tar file. ``--path`` can be repeated if an arrangement spans multiple locations.
+
    - ``report``: Generates a report of the TRO.
+     - Arguments: ``--template`` and ``--output``.
 
 1. **TRO Interaction**: The script interacts with the TRO using the ``TRO`` class from the ``tro_utils`` module.
    It uses this class to create a new TRO, add arrangements and performances to the TRO, verify the TRO,
    and generate a report of the TRO.
+
+System requirements
+-------------------
+
+- Python 3.8+
+- `gpg`
+- `openssl`
 
 Example Usage
 -------------
@@ -75,7 +90,8 @@ Example workflow::
    $ export GPG_PASSPHRASE=...
    $ git clone https://github.com/transparency-certified/sample-trace-workflow /tmp/sample
    # It's sufficient to pass the profile only once
-   $ tro-utils --declaration sample_tro.jsonld --profile trs.jsonld arrangement add /tmp/sample \
+   $ tro-utils create --declaration sample_tro.jsonld --profile trs.jsonld
+   $ tro-utils --declaration sample_tro.jsonld  arrangement add /tmp/sample \
        -m "Before executing workflow" -i .git
      Loading profile from trs.jsonld
    $ tro-utils --declaration sample_tro.jsonld arrangement list
@@ -98,9 +114,12 @@ Example workflow::
      -a arrangement/0 \
      -M arrangement/1
     $ tro-utils --declaration sample_tro.jsonld sign
-    $ tro-utils --declaration sample_tro.jsonld verify
+    $ tro-utils --declaration sample_tro.jsonld verify-signature
       ...
       Verification: OK
+    $ tro-utils --declaration sample_tro.jsonld verify --arrangement 1 --path /tmp/sample --path /alt/path
+      ...
+      All files: OK
     $ curl -LO https://raw.githubusercontent.com/craig-willis/trace-report/main/templates/tro.md.jinja2
     $ tro-utils --declaration sample_tro.jsonld report --template tro.md.jinja2 -o report.md
 
