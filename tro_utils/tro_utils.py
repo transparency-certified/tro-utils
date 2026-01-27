@@ -1,4 +1,5 @@
 """Main module."""
+import base64
 import hashlib
 import json
 import os
@@ -393,7 +394,6 @@ class TRO:
 
     def generate_report(self, template, report):
         graph = self.data["@graph"][0]
-        trs = graph["trov:wasAssembledBy"]
         composition = {
             obj["@id"]: obj for obj in graph["trov:hasComposition"]["trov:hasArtifact"]
         }
@@ -439,7 +439,8 @@ class TRO:
             dot.edge(accessed, description)
             dot.edge(description, contributed)
 
-        dot.render("workflow", directory=".", cleanup=True, format="png")
+        png_bytes = dot.pipe(format="png")
+        png_base64 = base64.b64encode(png_bytes).decode("utf-8")
 
         # Detect changes between arrangements
         # Which files were added? Which files changed?
@@ -460,26 +461,8 @@ class TRO:
                     arrangements[keys[n]]["artifacts"][location]["status"] = "Created"
 
         data = {
-            "name": graph.get("schema:name", "No name provided"),
-            "description": graph.get("schema:description", "No Description provided"),
-            "creator": graph.get("schema:creator", "No creator provided"),
-            "dateCreated": graph.get("schema:dateCreated", "No date provided"),
-            "trs": {
-                "publicKey": trs.get("trov:publicKey"),
-                "name": trs.get("schema:name", ""),
-                "comment": trs["rdfs:comment"],
-                "publisher": trs.get("schema:publisher", ""),
-                "description": trs.get("schema:description", ""),
-                "email": trs.get("schema:email", ""),
-                "url": trs.get("schema:url", ""),
-                "capabilities": [
-                    {
-                        "name": _.get("trov:name", _["@type"]),
-                        "description": _.get("trov:description", ""),
-                    }
-                    for _ in trs["trov:hasCapability"]
-                ],
-            },
+            **graph,
+            "workflow_diagram": png_base64,
             "trps": [
                 {
                     "id": trp["@id"],
