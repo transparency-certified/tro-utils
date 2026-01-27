@@ -437,7 +437,7 @@ class TRO:
             dot.edge(accessed, description)
             dot.edge(description, contributed)
 
-        dot.render("workflow", ".", cleanup=True, format="png")
+        dot.render("workflow", directory=".", cleanup=True, format="png")
 
         # Detect changes between arrangements
         # Which files were added? Which files changed?
