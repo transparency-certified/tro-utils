@@ -57,16 +57,16 @@ def temp_workspace(tmp_path):
     return workspace
 
 
-@pytest.fixture
-def gpg_setup(tmp_path):
-    """Set up a temporary GPG environment for testing."""
-    gpg_home = tmp_path / "gnupg"
-    gpg_home.mkdir(mode=0o700)
+@pytest.fixture(scope="session")
+def gpg_setup(tmp_path_factory):
+    """Set up a temporary GPG environment for testing (once per session)."""
+    gpg_home = tmp_path_factory.mktemp("gnupg")
+    gpg_home.chmod(0o700)
 
     # Create GPG instance
     gpg = gnupg.GPG(gnupghome=str(gpg_home))
 
-    # Generate a test key
+    # Generate a test key (this is slow, so we only do it once)
     input_data = gpg.gen_key_input(
         key_type="RSA",
         key_length=2048,
@@ -98,10 +98,11 @@ def gpg_setup(tmp_path):
     }
 
 
-@pytest.fixture
-def trs_profile(tmp_path):
-    """Create a TRS profile file."""
-    profile_file = tmp_path / "trs.jsonld"
+@pytest.fixture(scope="session")
+def trs_profile(tmp_path_factory):
+    """Create a TRS profile file (once per session)."""
+    profile_dir = tmp_path_factory.mktemp("profiles")
+    profile_file = profile_dir / "trs.jsonld"
     profile_data = {
         "rdfs:comment": "Test TRS for testing purposes",
         "trov:hasCapability": [
