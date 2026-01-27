@@ -39,5 +39,21 @@ classifiers = [
 [project.scripts]
 tro-utils = "tro_utils.cli:cli"
 
-[dependency-groups]
-test = ["pytest", "coverage", "pytest-cov"]
+[project.optional-dependencies]
+test = [
+    "pytest>=6.2.4",
+    "pytest-cov>=7.0.0",
+    "coverage>=7.0",
+]
+dev = [
+    "pytest>=6.2.4",
+    "pytest-cov>=7.0.0",
+    "coverage>=7.0",
+    "bump2version>=0.5.11",
+    "wheel>=0.33.6",
+    "watchdog>=0.9.0",
+    "flake8>=3.7.8",
+    "tox>=3.14.0",
+    "Sphinx>=1.8.5",
+    "twine>=1.14.0",
+]
