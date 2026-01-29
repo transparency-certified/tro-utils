@@ -43,7 +43,7 @@ class TRO:
             self.dirname = "."
         else:
             self.basename = os.path.basename(filepath).rsplit(".")[0]
-            self.dirname = os.path.dirname(filepath)
+            self.dirname = os.path.dirname(filepath) or "."
 
         if profile is not None and os.path.exists(profile):
             print(f"Loading profile from {profile}")
@@ -108,6 +108,8 @@ class TRO:
 
     @property
     def base_filename(self):
+        if not self.basename:
+            raise ValueError("basename is not set")
         return os.path.abspath(os.path.join(self.dirname, self.basename))
 
     @property
@@ -448,6 +450,11 @@ class TRO:
         caps=None,
         extra_attributes=None,
     ):
+        if caps is None:
+            caps = []
+        if extra_attributes is None:
+            extra_attributes = {}
+
         trp = {
             "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
             "@type": "trov:TrustedResearchPerformance",
@@ -457,8 +464,7 @@ class TRO:
             "trov:startedAtTime": start_time.isoformat(),
             "trov:endedAtTime": end_time.isoformat(),
         }
-        if extra_attributes and isinstance(extra_attributes, dict):
-            trp.update(extra_attributes)
+        trp.update(extra_attributes)
 
         available_arrangements = [
             _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]

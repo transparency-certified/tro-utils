@@ -25,6 +25,8 @@ class StringOrPath(click.ParamType):
     name = "string_or_path"
 
     def __init__(self, templates=None):
+        if templates is None:
+            templates = {}
         self.valid_strings = templates.keys()
 
     def convert(self, value, param, ctx):
