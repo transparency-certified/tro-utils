@@ -6,6 +6,8 @@
 
 This package provides a set of utilities for working with Transparent Research Objects (TROs). It is designed to be used in conjunction with the [TRO specification](https://transparency-certified.github.io/trace-specification/docs/specifications/tro/0.1/index.html).
 
+**📚 [Read the Full Documentation](https://tro-utils.readthedocs.io/en/latest/?version=latest)**
+
 It uses the `Click` library to define commands and options. Here's a summary of the main features:
 
 1. **Global Options**: The script defines several global options that can be used with any command, such as `--declaration`, `--profile`, `--gpg-fingerprint`, `--gpg-passphrase`, `--tro-creator`, `--tro-name`, and `--tro-description`. These options can be used to specify various parameters for the TRO.
