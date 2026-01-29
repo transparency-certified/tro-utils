@@ -3,9 +3,13 @@ import os
 import sys
 
 import click
+from rich.console import Console
+from rich.table import Table
 
 from . import TRPAttribute
 from .tro_utils import TRO
+
+console = Console()
 
 _TEMPLATES = {
     "default": {
@@ -21,6 +25,8 @@ class StringOrPath(click.ParamType):
     name = "string_or_path"
 
     def __init__(self, templates=None):
+        if templates is None:
+            templates = {}
         self.valid_strings = templates.keys()
 
     def convert(self, value, param, ctx):
@@ -101,19 +107,102 @@ def cli(
 
 
 @cli.command(help="Verify that TRO is signed and timestamped correctly")
-@click.pass_context
-def verify(ctx):
-    declaration = ctx.parent.params.get("declaration")
-    gpg_fingerprint = ctx.parent.params.get("gpg_fingerprint")
-    gpg_passphrase = ctx.parent.params.get("gpg_passphrase")
-    profile = ctx.parent.params.get("profile")
+@click.argument("declaration", type=click.Path(exists=True))
+def verify_timestamp(declaration):
     tro = TRO(
         filepath=declaration,
-        gpg_fingerprint=gpg_fingerprint,
-        gpg_passphrase=gpg_passphrase,
-        profile=profile,
     )
     tro.verify_timestamp()
+
+
+@cli.command(help="Verify the integrity of the TRO")
+@click.argument("declaration", type=click.Path(exists=True))
+@click.argument(
+    "package",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "--arrangement-id",
+    "-a",
+    type=click.STRING,
+    required=False,
+    help="ID of the arrangement to verify. If not provided all arrangements will be tried",
+)
+@click.option(
+    "--subpath",
+    "-s",
+    type=click.STRING,
+    required=False,
+    help="Subpath within the package structure, e.g. if arrangement is stored in a subdirectory",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show detailed information during verification",
+)
+def verify_package(declaration, package, arrangement_id, subpath, verbose):
+    subpath = subpath if subpath else ""
+    tro = TRO(
+        filepath=declaration,
+    )
+    if not arrangement_id:
+        arrangements = [a["@id"] for a in tro.list_arrangements()]
+    else:
+        arrangements = [arrangement_id]
+
+    for arrangement in arrangements:
+        msg = (
+            f"Verifying that arrangement '{arrangement}' matches package contents "
+            f"of '{package}"
+        )
+        if subpath:
+            msg += f"::{subpath}"
+        msg += "'"
+        click.echo(msg, nl=False)
+        extra, mismatched, missing, success = tro.verify_replication_package(
+            arrangement, package, subpath
+        )
+        if success:
+            click.secho(" ✓", fg="green")
+        else:
+            click.secho(" ✗", fg="red")
+
+        if extra and verbose:
+            table = Table(
+                title="[bold red]Extra Files Found[/bold red]", show_header=False
+            )
+            table.add_column("File", style="yellow")
+            for e in extra:
+                table.add_row(e)
+            console.print(table)
+            console.print()
+
+        if mismatched and verbose:
+            table = Table(title="[bold red]Mismatched Files Found[/bold red]")
+            table.add_column("File", style="cyan")
+            table.add_column("Expected Hash", style="green")
+            table.add_column("Actual Hash", style="red")
+            for filepath, expected_hash, actual_hash in mismatched:
+                expected_display = (
+                    expected_hash[:16] + "..." if expected_hash else "[dim]None[/dim]"
+                )
+                actual_display = (
+                    actual_hash[:16] + "..." if actual_hash else "[dim]None[/dim]"
+                )
+                table.add_row(filepath, expected_display, actual_display)
+            console.print(table)
+            console.print()
+
+        if missing and verbose:
+            table = Table(
+                title="[bold red]Missing Files Found[/bold red]", show_header=False
+            )
+            table.add_column("File", style="magenta")
+            for m in missing:
+                table.add_row(m)
+            console.print(table)
+            console.print()
 
 
 @cli.group(help="Manage arrangements in the TRO")

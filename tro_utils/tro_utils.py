@@ -6,6 +6,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import zipfile
 
 import datetime
 import gnupg
@@ -42,7 +43,7 @@ class TRO:
             self.dirname = "."
         else:
             self.basename = os.path.basename(filepath).rsplit(".")[0]
-            self.dirname = os.path.dirname(filepath)
+            self.dirname = os.path.dirname(filepath) or "."
 
         if profile is not None and os.path.exists(profile):
             print(f"Loading profile from {profile}")
@@ -61,13 +62,16 @@ class TRO:
                         "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
                         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
                         "trov": "https://w3id.org/trace/2023/05/trov#",
-                        "schema": "https://schema.org"
+                        "schema": "https://schema.org",
                     }
                 ],
                 "@graph": [
                     {
                         "@id": "tro",
-                        "@type": ["trov:TransparentResearchObject", "schema:CreativeWork"],
+                        "@type": [
+                            "trov:TransparentResearchObject",
+                            "schema:CreativeWork",
+                        ],
                         "schema:creator": tro_creator or "TRO utils",
                         "schema:name": tro_name or "Some TRO",
                         "schema:description": tro_description or "Some description",
@@ -82,7 +86,10 @@ class TRO:
                         "trov:hasPerformance": [],
                         "trov:wasAssembledBy": {
                             "@id": "trs",
-                            "@type": ["trov:TrustedResearchSystem", "schema:Organization"],
+                            "@type": [
+                                "trov:TrustedResearchSystem",
+                                "schema:Organization",
+                            ],
                             **self.profile,
                         },
                     },
@@ -101,6 +108,8 @@ class TRO:
 
     @property
     def base_filename(self):
+        if not self.basename:
+            raise ValueError("basename is not set")
         return os.path.abspath(os.path.join(self.dirname, self.basename))
 
     @property
@@ -155,6 +164,54 @@ class TRO:
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
+    def get_arrangement_path_hash_map(self, arrangement_id):
+        """
+        Get a mapping of paths to hashes for a specific arrangement.
+
+        Args:
+            arrangement_id: The ID of the arrangement (e.g., "arrangement/0")
+
+        Returns:
+            dict: A dictionary mapping file paths to their SHA256 hashes
+
+        Raises:
+            ValueError: If the arrangement ID does not exist
+        """
+        # Find the arrangement
+        arrangement = None
+        for arr in self.data["@graph"][0]["trov:hasArrangement"]:
+            if arr["@id"] == arrangement_id:
+                arrangement = arr
+                break
+
+        if arrangement is None:
+            available = [
+                arr["@id"] for arr in self.data["@graph"][0]["trov:hasArrangement"]
+            ]
+            raise ValueError(
+                f"Arrangement '{arrangement_id}' not found. "
+                f"Available arrangements: {available}"
+            )
+
+        # Build a composition lookup map (artifact id -> hash)
+        composition_map = {
+            artifact["@id"]: artifact["trov:sha256"]
+            for artifact in self.data["@graph"][0]["trov:hasComposition"][
+                "trov:hasArtifact"
+            ]
+        }
+
+        # Build the path -> hash mapping
+        path_hash_map = {}
+        for locus in arrangement.get("trov:hasLocus", []):
+            path = locus["trov:hasLocation"]
+            artifact_id = locus["trov:hasArtifact"]["@id"]
+            hash_value = composition_map.get(artifact_id)
+            if hash_value:
+                path_hash_map[path] = hash_value
+
+        return path_hash_map
+
     def add_arrangement(
         self, directory, ignore_dirs=None, comment=None, resolve_symlinks=True
     ):
@@ -178,10 +235,12 @@ class TRO:
             if os.path.islink(filepath):
                 mime_type = "inode/symlink"
             else:
-                mime_type = magic_wrapper.from_file(filepath) or "application/octet-stream"
+                mime_type = (
+                    magic_wrapper.from_file(filepath) or "application/octet-stream"
+                )
             composition[hash_value] = {
                 "@id": f"composition/1/artifact/{i}",
-                "trov:mimeType": mime_type
+                "trov:mimeType": mime_type,
             }
             i += 1
 
@@ -232,7 +291,9 @@ class TRO:
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for filename in files:
                 filepath = os.path.join(root, filename)
-                hash_value = self.sha256_for_file(filepath, resolve_symlinks=resolve_symlinks)
+                hash_value = self.sha256_for_file(
+                    filepath, resolve_symlinks=resolve_symlinks
+                )
                 hashes[filepath] = hash_value
         return hashes
 
@@ -273,12 +334,11 @@ class TRO:
     def verify_timestamp(self):
         """Verify that a run is valid and signed."""
 
-        if os.path.exists(self.sig_filename):
+        try:
             with open(self.sig_filename, "rb") as fp:
                 trs_signature = fp.read()
-        else:
-            print("computing")
-            trs_signature = str(self.trs_signature()).encode("utf-8")
+        except FileNotFoundError:
+            raise RuntimeError("Signature file does not exist")
 
         ts_data = {
             "tro_declaration": hashlib.sha512(
@@ -328,6 +388,58 @@ class TRO:
             ]
             subprocess.check_call(args)
 
+    def verify_replication_package(self, arrangement_id, package, subpath=None):
+        files_missing_in_arrangement = []
+        mismatched_hashes = []
+
+        arrangement_map = self.get_arrangement_path_hash_map(arrangement_id)
+
+        # Generator to yield (relative_filename, file_hash) tuples
+        def iterate_package_files():
+            if os.path.isdir(package):
+                for root, dirs, files in os.walk(package):
+                    for filename in files:
+                        filepath = os.path.join(root, filename)
+                        relative_filename = os.path.relpath(filepath, package)
+                        file_hash = self.sha256_for_file(filepath)
+                        yield relative_filename, file_hash
+            else:
+                with zipfile.ZipFile(package, "r") as zf:
+                    for fileinfo in zf.infolist():
+                        sha256 = hashlib.sha256()
+                        with zf.open(fileinfo.filename) as f:
+                            for chunk in iter(lambda: f.read(4096), b""):
+                                sha256.update(chunk)
+                        file_hash = sha256.hexdigest()
+                        yield fileinfo.filename, file_hash
+
+        for original_filename, file_hash in iterate_package_files():
+            relative_filename = original_filename
+
+            # Handle subpath filtering
+            if subpath is not None:
+                if not original_filename.startswith(subpath):
+                    continue
+                relative_filename = original_filename[len(subpath) :].lstrip("/")
+
+            # Check if file exists in arrangement
+            if relative_filename not in arrangement_map:
+                files_missing_in_arrangement.append(relative_filename)
+
+            # Verify hash
+            expected_hash = arrangement_map.pop(relative_filename, None)
+            if file_hash != expected_hash:
+                mismatched_hashes.append((relative_filename, expected_hash, file_hash))
+
+        dirty = (
+            files_missing_in_arrangement
+            or mismatched_hashes
+            or len(arrangement_map) > 0
+        )
+        return files_missing_in_arrangement, mismatched_hashes, list(
+            arrangement_map.keys()
+        ), not dirty
+
     def add_performance(
         self,
         start_time,
@@ -338,6 +450,11 @@ class TRO:
         caps=None,
         extra_attributes=None,
     ):
+        if caps is None:
+            caps = []
+        if extra_attributes is None:
+            extra_attributes = {}
+
         trp = {
             "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
             "@type": "trov:TrustedResearchPerformance",
@@ -347,8 +464,7 @@ class TRO:
             "trov:startedAtTime": start_time.isoformat(),
             "trov:endedAtTime": end_time.isoformat(),
         }
-        if extra_attributes and isinstance(extra_attributes, dict):
-            trp.update(extra_attributes)
+        trp.update(extra_attributes)
 
         available_arrangements = [
             _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]
@@ -434,7 +550,9 @@ class TRO:
         for trp in graph["trov:hasPerformance"]:
             description = trp["rdfs:comment"]
             accessed = arrangements[trp["trov:accessedArrangement"]["@id"]]["name"]
-            contributed = arrangements[trp["trov:contributedToArrangement"]["@id"]]["name"]
+            contributed = arrangements[trp["trov:contributedToArrangement"]["@id"]][
+                "name"
+            ]
             dot.node(description)
             dot.edge(accessed, description)
             dot.edge(description, contributed)
@@ -449,14 +567,18 @@ class TRO:
 
         for n in reversed(range(1, len(keys))):
             for location in arrangements[keys[n]]["artifacts"]:
-                if location in arrangements[keys[n-1]]["artifacts"]:
+                if location in arrangements[keys[n - 1]]["artifacts"]:
                     if (
                         arrangements[keys[n]]["artifacts"][location]["sha256"]
-                        != arrangements[keys[n-1]]["artifacts"][location]["sha256"]
+                        != arrangements[keys[n - 1]]["artifacts"][location]["sha256"]
                     ):
-                        arrangements[keys[n]]["artifacts"][location]["status"] = "Changed"
+                        arrangements[keys[n]]["artifacts"][location][
+                            "status"
+                        ] = "Changed"
                     else:
-                        arrangements[keys[n]]["artifacts"][location]["status"] = "Unchanged"
+                        arrangements[keys[n]]["artifacts"][location][
+                            "status"
+                        ] = "Unchanged"
                 else:
                     arrangements[keys[n]]["artifacts"][location]["status"] = "Created"
 
