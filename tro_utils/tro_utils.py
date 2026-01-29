@@ -281,18 +281,6 @@ class TRO:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    @staticmethod
-    def sha256_for_zipfile(zipfilepath):
-        hashes = {}
-        with zipfile.ZipFile(zipfilepath, "r") as zf:
-            for fileinfo in zf.infolist():
-                sha256 = hashlib.sha256()
-                with zf.open(fileinfo.filename) as f:
-                    for chunk in iter(lambda: f.read(4096), b""):
-                        sha256.update(chunk)
-                hashes[fileinfo.filename] = sha256.hexdigest()
-        return hashes
-
     def sha256_for_directory(self, directory, ignore_dirs=None, resolve_symlinks=True):
         if ignore_dirs is None:
             ignore_dirs = [".git"]  # Default ignore list

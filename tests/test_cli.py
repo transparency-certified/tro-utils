@@ -316,6 +316,40 @@ class TestVerifyCommands:
         assert result.exit_code == 0
         assert "✗" in result.output
 
+    def test_verify_package_verbose(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """Test package verification with verbose output showing details."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        # Modify a file and add a new one to trigger verbose output
+        (temp_workspace / "data.csv").write_text("modified content")
+        (temp_workspace / "extra.txt").write_text("extra file")
+        result = runner.invoke(
+            cli,
+            [
+                "verify-package",
+                str(tro_file),
+                str(temp_workspace),
+                "--verbose",
+            ],
+        )
+        assert result.exit_code == 0
+        # Verify verbose output includes file details
+        # The Rich library output includes file names when there are mismatches
+        assert "data.csv" in result.output or "extra.txt" in result.output
+
 
 class TestReportCommand:
     """Test report generation CLI command."""
