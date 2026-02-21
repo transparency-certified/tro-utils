@@ -353,21 +353,21 @@ def generate_report(ctx, template, output):
     help="End time of the performance",
 )
 @click.option(
-    "--caps",
-    "-c",
-    type=click.Choice([TRPAttribute.ISOLATION, TRPAttribute.RECORD_NETWORK]),
+    "--attribute",
+    "-a",
+    type=click.Choice([cap.value for cap in TRPAttribute]),
     required=False,
     multiple=True,
     help="Capabilities of the performance",
 )
 @click.option(
-    "--accessed", "-a", type=click.STRING, required=False, help="Accessed Arrangement"
+    "--accessed", "-A", type=click.STRING, required=False, help="Accessed Arrangement"
 )
 @click.option(
     "--modified", "-M", type=click.STRING, required=False, help="Modified Arrangement"
 )
 @click.pass_context
-def performance_add(ctx, comment, start, end, caps, accessed, modified):
+def performance_add(ctx, comment, start, end, attribute, accessed, modified):
     ctx = ctx.parent.parent
     declaration = ctx.params.get("declaration")
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
@@ -385,7 +385,7 @@ def performance_add(ctx, comment, start, end, caps, accessed, modified):
         comment=comment,
         accessed_arrangement=accessed,
         modified_arrangement=modified,
-        caps=caps,
+        attrs=attribute,
     )
     tro.save()
 

@@ -306,7 +306,7 @@ class TestTROPerformances:
             comment="Data processing workflow",
             accessed_arrangement="arrangement/0",
             modified_arrangement="arrangement/1",
-            caps=[TRPAttribute.ISOLATION, TRPAttribute.RECORD_NETWORK],
+            attrs=[TRPAttribute.NET_ISOLATION, TRPAttribute.RECORD_NETWORK],
         )
 
         # Verify performance was added
@@ -341,7 +341,7 @@ class TestTROPerformances:
                 end_time=end_time,
                 accessed_arrangement="arrangement/99",
                 modified_arrangement="arrangement/0",
-                caps=[],
+                attrs=[],
             )
 
 
@@ -629,7 +629,7 @@ class TestTROReporting:
             comment="Test workflow",
             accessed_arrangement="arrangement/0",
             modified_arrangement="arrangement/1",
-            caps=[TRPAttribute.ISOLATION],
+            attrs=[TRPAttribute.NET_ISOLATION],
         )
 
         # Create a simple template
@@ -756,7 +756,7 @@ class TestRealWorldWorkflow:
             comment=f"Data filtering with threshold={threshold}",
             accessed_arrangement="arrangement/0",
             modified_arrangement="arrangement/1",
-            caps=[TRPAttribute.ISOLATION, TRPAttribute.RECORD_NETWORK],
+            attrs=[TRPAttribute.NET_ISOLATION, TRPAttribute.RECORD_NETWORK],
         )
 
         # Save the TRO

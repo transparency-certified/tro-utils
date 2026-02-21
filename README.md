@@ -97,9 +97,9 @@ $ tro-utils --declaration sample_tro.jsonld performance add \
   -m "My magic workflow" \
   -s 2024-03-01T09:22:01 \
   -e 2024-03-02T10:00:11 \
-  -c trov:InternetIsolation \
-  -c trov:InternetAccessRecording \
-  -a arrangement/0 \
+  -a trov:InternetIsolation \
+  -a trov:InternetAccessRecording \
+  -A arrangement/0 \
   -M arrangement/1
  $ tro-utils --declaration sample_tro.jsonld sign
  $ tro-utils --declaration sample_tro.jsonld verify

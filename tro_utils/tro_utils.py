@@ -17,7 +17,7 @@ import rfc3161ng
 import graphviz
 from pyasn1.codec.der import encoder
 
-from . import TRPAttribute, caps_mapping
+from . import TROVCapability, TRPAttribute
 
 GPG_HOME = os.environ.get("GPG_HOME")
 
@@ -249,7 +249,7 @@ class TRO:
         arrangement_id = f"arrangement/{self.get_arrangement_seq()}"
         arrangement = {
             "@id": arrangement_id,
-            "@type": "trov:Artifact Arrangement",
+            "@type": "trov:ArtifactArrangement",
             "rdfs:comment": comment,
             "trov:hasLocus": [],
         }
@@ -447,11 +447,11 @@ class TRO:
         comment=None,
         accessed_arrangement=None,
         modified_arrangement=None,
-        caps=None,
+        attrs=None,
         extra_attributes=None,
     ):
-        if caps is None:
-            caps = []
+        if attrs is None:
+            attrs = []
         if extra_attributes is None:
             extra_attributes = {}
 
@@ -494,14 +494,20 @@ class TRO:
         }
 
         i = 0
-        for cap in caps:
-            assert cap in [TRPAttribute.RECORD_NETWORK, TRPAttribute.ISOLATION]
-            assert caps_mapping[cap] in trs_caps
+        for attr in attrs:
+            assert attr.value in TRPAttribute
+            cap = TROVCapability.translate(attr)
+            if cap.value not in trs_caps.keys():
+                raise ValueError(
+                    f"Capability {cap.value} is required for attribute {attr.value} but is not present in TRS capabilities"
+                    "List of TRS capabilities: "
+                    f"{list(trs_caps.keys())}"
+                )
             trp["trov:hasPerformanceAttribute"].append(
                 {
                     "@id": f"{trp['@id']}/attribute/{i}",
-                    "@type": cap,
-                    "trov:warrantedBy": {"@id": trs_caps[caps_mapping[cap]]},
+                    "@type": attr.value,
+                    "trov:warrantedBy": {"@id": trs_caps[cap.value]},
                 }
             )
             i += 1
