@@ -249,7 +249,7 @@ class TRO:
         arrangement_id = f"arrangement/{self.get_arrangement_seq()}"
         arrangement = {
             "@id": arrangement_id,
-            "@type": "trov:Artifact Arrangement",
+            "@type": "trov:ArtifactArrangement",
             "rdfs:comment": comment,
             "trov:hasLocus": [],
         }
