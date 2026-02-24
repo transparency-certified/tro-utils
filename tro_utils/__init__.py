@@ -4,7 +4,7 @@ from enum import Enum, EnumMeta
 
 __author__ = """Kacper Kowalik"""
 __email__ = "xarthisius.kk@gmail.com"
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 class MetaEnum(EnumMeta):
