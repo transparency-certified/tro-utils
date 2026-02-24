@@ -306,7 +306,7 @@ class TestTROPerformances:
             comment="Data processing workflow",
             accessed_arrangement="arrangement/0",
             modified_arrangement="arrangement/1",
-            attrs=[TRPAttribute.NET_ISOLATION, TRPAttribute.RECORD_NETWORK],
+            attrs=["trov:InternetIsolation", TRPAttribute.RECORD_NETWORK],
         )
 
         # Verify performance was added

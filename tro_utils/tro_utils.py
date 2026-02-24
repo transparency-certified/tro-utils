@@ -495,6 +495,8 @@ class TRO:
 
         i = 0
         for attr in attrs:
+            if isinstance(attr, str):
+                attr = TRPAttribute(attr)
             assert attr.value in TRPAttribute
             cap = TROVCapability.translate(attr)
             if cap.value not in trs_caps.keys():
