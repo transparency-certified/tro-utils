@@ -1,5 +1,6 @@
 """Console script for tro_utils."""
-import os
+
+import pathlib
 import sys
 
 import click
@@ -34,7 +35,7 @@ class StringOrPath(click.ParamType):
         if value in self.valid_strings:
             return value
         # Check if the value is a valid path
-        elif os.path.exists(value) and os.path.isfile(value):
+        elif pathlib.Path(value).exists() and pathlib.Path(value).is_file():
             return value
         else:
             self.fail(
@@ -142,7 +143,7 @@ def verify_timestamp(declaration):
     help="Show detailed information during verification",
 )
 def verify_package(declaration, package, arrangement_id, subpath, verbose):
-    subpath = subpath if subpath else ""
+    subpath = subpath if subpath else None
     tro = TRO(
         filepath=declaration,
     )
@@ -160,7 +161,7 @@ def verify_package(declaration, package, arrangement_id, subpath, verbose):
             msg += f"::{subpath}"
         msg += "'"
         click.echo(msg, nl=False)
-        extra, mismatched, missing, success = tro.verify_replication_package(
+        missing, mismatched, extra, success = tro.verify_replication_package(
             arrangement, package, subpath
         )
         if success:
@@ -321,9 +322,8 @@ def sign(ctx):
 def generate_report(ctx, template, output):
     declaration = ctx.parent.params.get("declaration")
     if template in _TEMPLATES:
-        template = os.path.join(
-            os.path.dirname(__file__), _TEMPLATES[template]["filename"]
-        )
+        template = pathlib.Path(__file__).parent / _TEMPLATES[template]["filename"]
+        template = str(template.resolve())
     tro = TRO(
         filepath=declaration,
     )

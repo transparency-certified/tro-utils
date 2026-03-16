@@ -1,4 +1,5 @@
 """Main module."""
+
 import base64
 import hashlib
 import json
@@ -42,10 +43,15 @@ class TRO:
             self.basename = "some_tro"
             self.dirname = "."
         else:
-            self.basename = os.path.basename(filepath).rsplit(".")[0]
-            self.dirname = os.path.dirname(filepath) or "."
+            filepath_obj = pathlib.Path(filepath)
+            self.basename = filepath_obj.stem
+            self.dirname = (
+                str(filepath_obj.parent)
+                if filepath_obj.parent != pathlib.Path(".")
+                else "."
+            )
 
-        if profile is not None and os.path.exists(profile):
+        if profile is not None and pathlib.Path(profile).exists():
             print(f"Loading profile from {profile}")
             self.profile = json.load(open(profile))
         else:
@@ -55,7 +61,7 @@ class TRO:
                 "trov:publicKey": None,
             }
 
-        if not os.path.exists(self.tro_filename):
+        if not pathlib.Path(self.tro_filename).exists():
             self.data = {
                 "@context": [
                     {
@@ -100,9 +106,9 @@ class TRO:
         self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
         if gpg_fingerprint:
             self.gpg_key_id = self.gpg.list_keys().key_map[gpg_fingerprint]["keyid"]
-            self.data["@graph"][0]["trov:wasAssembledBy"][
-                "trov:publicKey"
-            ] = self.gpg.export_keys(self.gpg_key_id)
+            self.data["@graph"][0]["trov:wasAssembledBy"]["trov:publicKey"] = (
+                self.gpg.export_keys(self.gpg_key_id)
+            )
         if gpg_passphrase:
             self.gpg_passphrase = gpg_passphrase
 
@@ -110,7 +116,7 @@ class TRO:
     def base_filename(self):
         if not self.basename:
             raise ValueError("basename is not set")
-        return os.path.abspath(os.path.join(self.dirname, self.basename))
+        return str((pathlib.Path(self.dirname) / self.basename).resolve())
 
     @property
     def tro_filename(self):
@@ -232,7 +238,7 @@ class TRO:
         for filepath, hash_value in hashes.items():
             if hash_value in composition:
                 continue
-            if os.path.islink(filepath):
+            if pathlib.Path(filepath).is_symlink():
                 mime_type = "inode/symlink"
             else:
                 mime_type = (
@@ -276,7 +282,8 @@ class TRO:
     @staticmethod
     def sha256_for_file(filepath, resolve_symlinks=True):
         sha256 = hashlib.sha256()
-        if not os.path.isfile(filepath) or os.path.islink(filepath):
+        filepath_obj = pathlib.Path(filepath)
+        if not filepath_obj.is_file() or filepath_obj.is_symlink():
             return ""
         with open(filepath, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
@@ -290,7 +297,7 @@ class TRO:
         for root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for filename in files:
-                filepath = os.path.join(root, filename)
+                filepath = str(pathlib.Path(root) / filename)
                 hash_value = self.sha256_for_file(
                     filepath, resolve_symlinks=resolve_symlinks
                 )
@@ -396,12 +403,16 @@ class TRO:
 
         # Generator to yield (relative_filename, file_hash) tuples
         def iterate_package_files():
-            if os.path.isdir(package):
+            if pathlib.Path(package).is_dir():
+                package_path = pathlib.Path(package)
                 for root, dirs, files in os.walk(package):
                     for filename in files:
-                        filepath = os.path.join(root, filename)
-                        relative_filename = os.path.relpath(filepath, package)
-                        file_hash = self.sha256_for_file(filepath)
+                        filepath = pathlib.Path(root) / filename
+                        # Use pathlib for robust cross-platform path handling
+                        relative_filename = filepath.relative_to(
+                            package_path
+                        ).as_posix()
+                        file_hash = self.sha256_for_file(str(filepath))
                         yield relative_filename, file_hash
             else:
                 with zipfile.ZipFile(package, "r") as zf:
@@ -418,9 +429,18 @@ class TRO:
 
             # Handle subpath filtering
             if subpath is not None:
-                if not original_filename.startswith(subpath):
+                # Use pathlib for robust cross-platform subpath handling
+                original_path = pathlib.PurePosixPath(original_filename)
+                subpath_posix = pathlib.PurePosixPath(subpath)
+
+                try:
+                    # Check if path is relative to subpath
+                    relative_filename = original_path.relative_to(
+                        subpath_posix
+                    ).as_posix()
+                except ValueError:
+                    # Path is not under subpath, skip it
                     continue
-                relative_filename = original_filename[len(subpath) :].lstrip("/")
 
             # Check if file exists in arrangement
             if relative_filename not in arrangement_map:
@@ -436,9 +456,12 @@ class TRO:
             or mismatched_hashes
             or len(arrangement_map) > 0
         )
-        return files_missing_in_arrangement, mismatched_hashes, list(
-            arrangement_map.keys()
-        ), not dirty
+        return (
+            files_missing_in_arrangement,
+            mismatched_hashes,
+            list(arrangement_map.keys()),
+            not dirty,
+        )
 
     def add_performance(
         self,
@@ -580,13 +603,13 @@ class TRO:
                         arrangements[keys[n]]["artifacts"][location]["sha256"]
                         != arrangements[keys[n - 1]]["artifacts"][location]["sha256"]
                     ):
-                        arrangements[keys[n]]["artifacts"][location][
-                            "status"
-                        ] = "Changed"
+                        arrangements[keys[n]]["artifacts"][location]["status"] = (
+                            "Changed"
+                        )
                     else:
-                        arrangements[keys[n]]["artifacts"][location][
-                            "status"
-                        ] = "Unchanged"
+                        arrangements[keys[n]]["artifacts"][location]["status"] = (
+                            "Unchanged"
+                        )
                 else:
                     arrangements[keys[n]]["artifacts"][location]["status"] = "Created"
 
