@@ -241,9 +241,10 @@ def info(ctx, verbose):
                     data[key].append(value)
 
     for c in tro.get_composition_info()["trov:hasArtifact"]:
+        trov_hash = TRO._get_hash(c)
         print(c["@id"])
         print(f"  - mimeType: {c['trov:mimeType']}")
-        print(f"  - sha256 {c['trov:sha256']}")
+        print(f"  - {trov_hash}")
         if verbose:
             print("  - Arrangements:")
             for a in data.get(c["@id"], []):
@@ -277,10 +278,10 @@ def add(ctx, directory, ignore_dir, comment):
     tro.save()
 
 
-@arrangement.command(help="List available arrangements in the TRO")
+@arrangement.command(name="list", help="List available arrangements in the TRO")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
 @click.pass_context
-def list(ctx, verbose):
+def list_arrangement(ctx, verbose):
     declaration = ctx.parent.parent.params.get("declaration")
     tro = TRO(
         filepath=declaration,

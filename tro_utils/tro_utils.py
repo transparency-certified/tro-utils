@@ -136,17 +136,51 @@ class TRO:
     def get_arrangement_seq(self):
         return len(self.data["@graph"][0]["trov:hasArrangement"])
 
+    @staticmethod
+    def _get_hash(artifact):
+        if isinstance(artifact, dict):
+            if "trov:sha256" in artifact:
+                return f"sha256:{artifact['trov:sha256']}"
+            elif "trov:hash" in artifact:
+                _hash = artifact["trov:hash"]
+                if isinstance(_hash, dict):
+                    return f"{_hash['trov:hashAlgorithm']}:{_hash['trov:hashValue']}"
+                elif isinstance(_hash, list):
+                    # try to find a sha256 hash, otherwise return the first hash in the list
+                    for h in _hash:
+                        if h.get("trov:hashAlgorithm") == "sha256":
+                            return f"sha256:{h['trov:hashValue']}"
+                    return (
+                        f"{_hash[0]['trov:hashAlgorithm']}:{_hash[0]['trov:hashValue']}"
+                    )
+        raise ValueError(f"Artifact {artifact} does not contain a recognizable hash")
+
     def get_hash_mapping(self):
         return {
-            _["trov:sha256"]: {"@id": _["@id"], "trov:mimeType": _["trov:mimeType"]}
+            self._get_hash(_): {"@id": _["@id"], "trov:mimeType": _["trov:mimeType"]}
             for _ in self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
         }
+
+    @staticmethod
+    def calculate_fingerprint(artifacts):
+        hashes = []
+        for art in artifacts:
+            if "trov:sha256" in art:
+                hashes.append(art["trov:sha256"])
+            elif "trov:hash" in art and isinstance(art["trov:hash"], dict):
+                hashes.append(art["trov:hash"]["trov:hashValue"])
+            elif "trov:hash" in art and isinstance(art["trov:hash"], list):
+                hashes += [_["trov:hashValue"] for _ in art["trov:hash"]]
+        return hashlib.sha256("".join(sorted(hashes)).encode("utf-8")).hexdigest()
 
     def update_composition(self, composition):
         self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"] = [
             {
                 "@id": value["@id"],
-                "trov:sha256": key,
+                "trov:hash": {
+                    "trov:hashAlgorithm": key.split(":")[0],
+                    "trov:hashValue": key.split(":")[1],
+                },
                 "trov:mimeType": value["trov:mimeType"],
                 "@type": "trov:ResearchArtifact",
             }
@@ -155,16 +189,16 @@ class TRO:
         self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"].sort(
             key=lambda x: x["@id"],
         )
-        hasArtifacts = self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
-        composition_fingerprint = hashlib.sha256(
-            "".join(sorted([art["trov:sha256"] for art in hasArtifacts])).encode(
-                "utf-8"
-            )
-        ).hexdigest()
+        fingerprint = self.calculate_fingerprint(
+            self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
+        )
         self.data["@graph"][0]["trov:hasComposition"]["trov:hasFingerprint"] = {
             "@id": "fingerprint",
             "@type": "trov:CompositionFingerprint",
-            "trov:sha256": composition_fingerprint,
+            "trov:hash": {
+                "trov:hashAlgorithm": "sha256",
+                "trov:hashValue": fingerprint,
+            },
         }
 
     def list_arrangements(self):
@@ -201,7 +235,7 @@ class TRO:
 
         # Build a composition lookup map (artifact id -> hash)
         composition_map = {
-            artifact["@id"]: artifact["trov:sha256"]
+            artifact["@id"]: self._get_hash(artifact)
             for artifact in self.data["@graph"][0]["trov:hasComposition"][
                 "trov:hasArtifact"
             ]
@@ -288,7 +322,7 @@ class TRO:
         with open(filepath, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256.update(chunk)
-        return sha256.hexdigest()
+        return f"sha256:{sha256.hexdigest()}"
 
     def sha256_for_directory(self, directory, ignore_dirs=None, resolve_symlinks=True):
         if ignore_dirs is None:
@@ -412,8 +446,7 @@ class TRO:
                         relative_filename = filepath.relative_to(
                             package_path
                         ).as_posix()
-                        file_hash = self.sha256_for_file(str(filepath))
-                        yield relative_filename, file_hash
+                        yield relative_filename, self.sha256_for_file(str(filepath))
             else:
                 with zipfile.ZipFile(package, "r") as zf:
                     for fileinfo in zf.infolist():
@@ -421,7 +454,7 @@ class TRO:
                         with zf.open(fileinfo.filename) as f:
                             for chunk in iter(lambda: f.read(4096), b""):
                                 sha256.update(chunk)
-                        file_hash = sha256.hexdigest()
+                        file_hash = f"sha256:{sha256.hexdigest()}"
                         yield fileinfo.filename, file_hash
 
         for original_filename, file_hash in iterate_package_files():
@@ -548,9 +581,7 @@ class TRO:
         for arr in self.data["@graph"][0]["trov:hasArrangement"]:
             artifacts = {
                 obj["trov:hasLocation"]: {
-                    "sha256": composition[obj["trov:hasArtifact"]["@id"]][
-                        "trov:sha256"
-                    ],
+                    "hash": self._get_hash(composition[obj["trov:hasArtifact"]["@id"]]),
                     "creator": obj.get("schema:creator", "trs"),
                     "createdDate": obj.get("schema:createdDate", "None"),
                 }
@@ -600,8 +631,8 @@ class TRO:
             for location in arrangements[keys[n]]["artifacts"]:
                 if location in arrangements[keys[n - 1]]["artifacts"]:
                     if (
-                        arrangements[keys[n]]["artifacts"][location]["sha256"]
-                        != arrangements[keys[n - 1]]["artifacts"][location]["sha256"]
+                        arrangements[keys[n]]["artifacts"][location]["hash"]
+                        != arrangements[keys[n - 1]]["artifacts"][location]["hash"]
                     ):
                         arrangements[keys[n]]["artifacts"][location]["status"] = (
                             "Changed"

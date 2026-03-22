@@ -1,11 +1,13 @@
 """Tests for tro_utils package."""
+
 import datetime
 import json
 import os
-from unittest.mock import patch, MagicMock
+from hashlib import sha256
+from unittest.mock import MagicMock, patch
 
-import pytest
 import gnupg
+import pytest
 
 from tro_utils import TRPAttribute
 from tro_utils.tro_utils import TRO
@@ -28,9 +30,9 @@ def create_tro_with_gpg(filepath, gpg_setup, **kwargs):
     if gpg_fingerprint:
         tro.gpg = gpg_setup["gpg"]
         tro.gpg_key_id = gpg_setup["keyid"]
-        tro.data["@graph"][0]["trov:wasAssembledBy"][
-            "trov:publicKey"
-        ] = tro.gpg.export_keys(tro.gpg_key_id)
+        tro.data["@graph"][0]["trov:wasAssembledBy"]["trov:publicKey"] = (
+            tro.gpg.export_keys(tro.gpg_key_id)
+        )
         tro.gpg_passphrase = kwargs.get("gpg_passphrase")
 
     return tro
@@ -567,7 +569,7 @@ class TestTROHashingAndComposition:
 
         # Verify hash is correct (pre-computed for "Hello, World!")
         expected_hash = (
-            "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
+            "sha256:dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
         )
         assert hash_value == expected_hash
 
@@ -584,7 +586,10 @@ class TestTROHashingAndComposition:
 
         # Verify all hashes are non-empty
         for filepath, hash_value in hashes.items():
-            assert len(hash_value) == 64  # SHA256 produces 64 hex characters
+            assert hash_value.startswith("sha256:")
+            assert (
+                len(hash_value[len("sha256:") :]) == 64
+            )  # SHA256 produces 64 hex characters
 
     def test_composition_fingerprint(self, temp_workspace, tmp_path, gpg_setup):
         """Test that composition fingerprint is computed correctly."""
@@ -600,7 +605,13 @@ class TestTROHashingAndComposition:
         assert (
             composition["trov:hasFingerprint"]["@type"] == "trov:CompositionFingerprint"
         )
-        assert len(composition["trov:hasFingerprint"]["trov:sha256"]) == 64
+        assert (
+            composition["trov:hasFingerprint"]["trov:hash"]["trov:hashAlgorithm"]
+            == "sha256"
+        )
+        assert (
+            len(composition["trov:hasFingerprint"]["trov:hash"]["trov:hashValue"]) == 64
+        )
 
 
 class TestTROReporting:
@@ -807,7 +818,9 @@ class TestRealWorldWorkflow:
         # Verify all artifacts have required fields
         for artifact in artifacts:
             assert "@id" in artifact
-            assert "trov:sha256" in artifact
+            assert "trov:hash" in artifact
+            assert "trov:hashAlgorithm" in artifact["trov:hash"]
+            assert artifact["trov:hash"]["trov:hashAlgorithm"] == "sha256"
             assert "trov:mimeType" in artifact
             assert artifact["@type"] == "trov:ResearchArtifact"
 
@@ -862,6 +875,78 @@ class TestTROUtilityMethods:
         assert "@type" in composition_info
         assert "trov:hasArtifact" in composition_info
         assert len(composition_info["trov:hasArtifact"]) > 0
+
+    def test_hash_handling(self, tmp_path, gpg_setup):
+        """Test that hash handling works correctly."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+
+        example_hash = (
+            "6591aa920533077fbfa0ffb62d4a2e246b692e0754ca86b86d86824f313325a2"
+        )
+        # Test that providing a hash directly works
+        artifacts = {
+            "trov:sha256": example_hash,
+        }
+        assert tro._get_hash(artifacts)[len("sha256:") :] == example_hash
+
+        artifact_with_hash_dict = {
+            "trov:hash": {
+                "trov:hashAlgorithm": "sha256",
+                "trov:hashValue": example_hash,
+            },
+        }
+        assert tro._get_hash(artifact_with_hash_dict)[len("sha256:") :] == example_hash
+
+        artifact_with_hash_list = {
+            "trov:hash": [
+                {
+                    "trov:hashAlgorithm": "sha512",
+                    "trov:hashValue": "foo",
+                },
+                {
+                    "trov:hashAlgorithm": "sha256",
+                    "trov:hashValue": example_hash,
+                },
+            ]
+        }
+        assert tro._get_hash(artifact_with_hash_list)[len("sha256:") :] == example_hash
+
+        artifact_with_hash_list = {
+            "trov:hash": [
+                {
+                    "trov:hashAlgorithm": "sha512",
+                    "trov:hashValue": "foo",
+                },
+                {
+                    "trov:hashAlgorithm": "md5",
+                    "trov:hashValue": "md5hash",
+                },
+            ]
+        }
+        assert tro._get_hash(artifact_with_hash_list) == "sha512:foo"
+
+        with pytest.raises(ValueError, match="does not contain"):
+            tro._get_hash({})
+
+    def test_fingerprint(self, tmp_path, gpg_setup):
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+
+        artifacts = [
+            {"trov:sha256": "abc123"},
+            {"trov:hash": {"trov:hashAlgorithm": "sha256", "trov:hashValue": "def456"}},
+            {
+                "trov:hash": [
+                    {"trov:hashAlgorithm": "sha256", "trov:hashValue": "abc123"},
+                    {"trov:hashAlgorithm": "sha512", "trov:hashValue": "def456"},
+                ]
+            },
+        ]
+        fingerprint = tro.calculate_fingerprint(artifacts)
+        assert fingerprint == sha256("abc123abc123def456def456".encode()).hexdigest()
 
 
 class TestReplicationPackageVerification:
@@ -1248,8 +1333,11 @@ class TestReplicationPackageVerification:
 
         # Verify all values are valid SHA256 hashes
         for path, hash_value in path_hash_map.items():
-            assert len(hash_value) == 64
-            assert all(c in "0123456789abcdef" for c in hash_value)
+            assert hash_value.startswith("sha256:")
+            assert len(hash_value) == 64 + len(
+                "sha256:"
+            )  # "sha256:" prefix + 64 hex chars
+            assert all(c in "0123456789abcdef" for c in hash_value[len("sha256:") :])
 
     def test_get_arrangement_path_hash_map_invalid_id(self, tmp_path, gpg_setup):
         """Test that getting map for invalid arrangement ID raises error."""
