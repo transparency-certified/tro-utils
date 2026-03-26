@@ -198,7 +198,7 @@ class TestTROArrangements:
         arrangements = tro.list_arrangements()
         assert len(arrangements) == 1
         assert arrangements[0]["rdfs:comment"] == "Initial arrangement"
-        assert len(arrangements[0]["trov:hasLocus"]) == 3  # 3 files in workspace
+        assert len(arrangements[0]["trov:hasArtifactLocation"]) == 3  # 3 files in workspace
 
         # Verify composition was updated
         composition = tro.data["@graph"][0]["trov:hasComposition"]
@@ -248,7 +248,7 @@ class TestTROArrangements:
         assert arrangements[1]["rdfs:comment"] == "After processing"
 
         # Second arrangement should have more files
-        assert len(arrangements[1]["trov:hasLocus"]) == 4  # added output.csv
+        assert len(arrangements[1]["trov:hasArtifactLocation"]) == 4  # added output.csv
 
         # Composition should have all unique files
         composition = tro.data["@graph"][0]["trov:hasComposition"]
@@ -271,8 +271,8 @@ class TestTROArrangements:
 
         # Verify .git files were not included
         arrangements = tro.list_arrangements()
-        loci = arrangements[0]["trov:hasLocus"]
-        locations = [loc["trov:hasLocation"] for loc in loci]
+        loci = arrangements[0]["trov:hasArtifactLocation"]
+        locations = [loc["trov:path"] for loc in loci]
 
         assert not any(".git" in loc for loc in locations)
 
@@ -785,14 +785,14 @@ class TestRealWorldWorkflow:
         )
 
         # Verify initial arrangement has 3 files
-        assert len(arrangements[0]["trov:hasLocus"]) == 3
+        assert len(arrangements[0]["trov:hasArtifactLocation"]) == 3
 
         # Verify final arrangement has more files (added filtered_output.csv and summary.json)
-        assert len(arrangements[1]["trov:hasLocus"]) == 5
+        assert len(arrangements[1]["trov:hasArtifactLocation"]) == 5
 
         # Verify file locations in final arrangement
         final_locations = [
-            loc["trov:hasLocation"] for loc in arrangements[1]["trov:hasLocus"]
+            loc["trov:path"] for loc in arrangements[1]["trov:hasArtifactLocation"]
         ]
         assert "filtered_output.csv" in final_locations
         assert "summary.json" in final_locations

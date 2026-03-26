@@ -243,9 +243,9 @@ class TRO:
 
         # Build the path -> hash mapping
         path_hash_map = {}
-        for locus in arrangement.get("trov:hasLocus", []):
-            path = locus["trov:hasLocation"]
-            artifact_id = locus["trov:hasArtifact"]["@id"]
+        for location in arrangement.get("trov:hasArtifactLocation", []):
+            path = location["trov:path"]
+            artifact_id = location["trov:artifact"]["@id"]
             hash_value = composition_map.get(artifact_id)
             if hash_value:
                 path_hash_map[path] = hash_value
@@ -291,17 +291,17 @@ class TRO:
             "@id": arrangement_id,
             "@type": "trov:ArtifactArrangement",
             "rdfs:comment": comment,
-            "trov:hasLocus": [],
+            "trov:hasArtifactLocation": [],
         }
         i = 0
         directory = pathlib.Path(directory)
         for filepath, hash_value in hashes.items():
-            arrangement["trov:hasLocus"].append(
+            arrangement["trov:hasArtifactLocation"].append(
                 {
-                    "@id": f"{arrangement_id}/locus/{i}",
-                    "@type": "trov:ArtifactLocus",
-                    "trov:hasArtifact": {"@id": composition[hash_value]["@id"]},
-                    "trov:hasLocation": pathlib.Path(filepath)
+                    "@id": f"{arrangement_id}/location/{i}",
+                    "@type": "trov:ArtifactLocation",
+                    "trov:artifact": {"@id": composition[hash_value]["@id"]},
+                    "trov:path": pathlib.Path(filepath)
                     .relative_to(directory)
                     .as_posix(),
                 }
@@ -580,13 +580,13 @@ class TRO:
         arrangements = {}
         for arr in self.data["@graph"][0]["trov:hasArrangement"]:
             artifacts = {
-                obj["trov:hasLocation"]: {
-                    "hash": self._get_hash(composition[obj["trov:hasArtifact"]["@id"]]),
+                obj["trov:path"]: {
+                    "hash": self._get_hash(composition[obj["trov:artifact"]["@id"]]),
                     "creator": obj.get("schema:creator", "trs"),
                     "createdDate": obj.get("schema:createdDate", "None"),
                 }
                 for obj in sorted(
-                    arr["trov:hasLocus"], key=lambda x: x["trov:hasLocation"]
+                    arr["trov:hasArtifactLocation"], key=lambda x: x["trov:path"]
                 )
             }
 
