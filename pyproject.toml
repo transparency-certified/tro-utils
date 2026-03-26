@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 61.0"]
+requires = ["setuptools >= 61.0", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,11 +13,12 @@ maintainers = [
 ]
 description = "Utilities for creating, editing and interacting with TROs"
 readme = "README.rst"
-version = "0.2.2"
+dynamic = ["version"]
 dependencies = [
   "Click>=7.0",
   "jinja2",
   "requests",
+  "packaging",
   "python-gnupg",
   "python-magic",
   "rfc3161ng",
@@ -50,7 +51,7 @@ dev = [
     "pytest>=6.2.4",
     "pytest-cov>=7.0.0",
     "coverage>=7.0",
-    "bump2version>=0.5.11",
+    "setuptools-scm",
     "wheel>=0.33.6",
     "watchdog>=0.9.0",
     "flake8>=3.7.8",
@@ -61,3 +62,6 @@ dev = [
 
 [tool.setuptools.package-data]
 tro_utils = ["*.jinja2"]
+
+[tool.setuptools_scm]
+write_to = "tro_utils/_version.py"

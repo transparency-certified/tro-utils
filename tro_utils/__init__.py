@@ -4,7 +4,13 @@ from enum import Enum, EnumMeta
 
 __author__ = """Kacper Kowalik"""
 __email__ = "xarthisius.kk@gmail.com"
-__version__ = "0.2.2"
+
+try:
+    from importlib.metadata import version, PackageNotFoundError
+
+    __version__ = version("tro-utils")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 
 class MetaEnum(EnumMeta):

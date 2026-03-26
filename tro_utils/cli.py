@@ -232,9 +232,9 @@ def info(ctx, verbose):
     if verbose:
         data = {}
         for a in tro.list_arrangements():
-            for c in a["trov:hasLocus"]:
-                key = c["trov:hasArtifact"]["@id"]
-                value = {"@id": c["@id"], "path": c["trov:hasLocation"]}
+            for c in a["trov:hasArtifactLocation"]:
+                key = c["trov:artifact"]["@id"]
+                value = {"@id": c["@id"], "path": c["trov:path"]}
                 if key not in data:
                     data[key] = [value]
                 else:
@@ -290,8 +290,8 @@ def list_arrangement(ctx, verbose):
         print(f"Arrangement(id={a['@id']}): {a['rdfs:comment']}")
         if verbose:
             print("  - Composition:")
-            for c in a["trov:hasLocus"]:
-                print(f"    - {c['trov:hasLocation']}")
+            for c in a["trov:hasArtifactLocation"]:
+                print(f"    - {c['trov:path']}")
 
 
 @cli.command(help="Sign the TRO")

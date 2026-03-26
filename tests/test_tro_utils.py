@@ -1,9 +1,12 @@
 """Tests for tro_utils package."""
 
 import datetime
+import importlib
 import json
 import os
+import sys
 from hashlib import sha256
+from importlib.metadata import PackageNotFoundError
 from unittest.mock import MagicMock, patch
 
 import gnupg
@@ -127,8 +130,51 @@ def tro_declaration(tmp_path):
     return str(tmp_path / "test_tro.jsonld")
 
 
+class TestVersion:
+    """Tests for package version detection in tro_utils/__init__.py."""
+
+    def test_version_fallback_when_package_not_found(self):
+        """__version__ should be 'unknown' when the package is not installed."""
+        with patch("importlib.metadata.version", side_effect=PackageNotFoundError):
+            import tro_utils as _tro_utils
+
+            importlib.reload(_tro_utils)
+            assert _tro_utils.__version__ == "unknown"
+
+    def test_version_set_from_metadata(self):
+        """__version__ should reflect the value returned by importlib.metadata.version."""
+        with patch("importlib.metadata.version", return_value="1.2.3"):
+            import tro_utils as _tro_utils
+
+            importlib.reload(_tro_utils)
+            assert _tro_utils.__version__ == "1.2.3"
+
+
 class TestTROCreation:
     """Test TRO object creation and initialization."""
+
+    def test_create_tro_raises_on_old_vocabulary_version(self, tmp_path):
+        """Loading a TRO with a vocabulary version older than TROV_VOCABULARY_VERSION raises RuntimeError."""
+        import json
+
+        old_tro_path = tmp_path / "old_tro.jsonld"
+        old_tro_data = {
+            "@context": [{}],
+            "@graph": [
+                {
+                    "@id": "tro",
+                    "trov:wasAssembledBy": {"trov:hasCapability": []},
+                    "trov:hasArrangement": [],
+                    "trov:hasComposition": {"trov:hasArtifact": []},
+                    "trov:hasPerformance": [],
+                    "trov:hasAttribute": [],
+                }
+            ],
+        }
+        old_tro_path.write_text(json.dumps(old_tro_data))
+
+        with pytest.raises(RuntimeError, match="older version of the TRO vocabulary"):
+            TRO(filepath=str(old_tro_path))
 
     def test_create_tro_without_file(self, tmp_path, gpg_setup):
         """Test creating a new TRO without existing file."""
@@ -198,7 +244,9 @@ class TestTROArrangements:
         arrangements = tro.list_arrangements()
         assert len(arrangements) == 1
         assert arrangements[0]["rdfs:comment"] == "Initial arrangement"
-        assert len(arrangements[0]["trov:hasLocus"]) == 3  # 3 files in workspace
+        assert (
+            len(arrangements[0]["trov:hasArtifactLocation"]) == 3
+        )  # 3 files in workspace
 
         # Verify composition was updated
         composition = tro.data["@graph"][0]["trov:hasComposition"]
@@ -248,7 +296,7 @@ class TestTROArrangements:
         assert arrangements[1]["rdfs:comment"] == "After processing"
 
         # Second arrangement should have more files
-        assert len(arrangements[1]["trov:hasLocus"]) == 4  # added output.csv
+        assert len(arrangements[1]["trov:hasArtifactLocation"]) == 4  # added output.csv
 
         # Composition should have all unique files
         composition = tro.data["@graph"][0]["trov:hasComposition"]
@@ -271,8 +319,8 @@ class TestTROArrangements:
 
         # Verify .git files were not included
         arrangements = tro.list_arrangements()
-        loci = arrangements[0]["trov:hasLocus"]
-        locations = [loc["trov:hasLocation"] for loc in loci]
+        loci = arrangements[0]["trov:hasArtifactLocation"]
+        locations = [loc["trov:path"] for loc in loci]
 
         assert not any(".git" in loc for loc in locations)
 
@@ -785,14 +833,14 @@ class TestRealWorldWorkflow:
         )
 
         # Verify initial arrangement has 3 files
-        assert len(arrangements[0]["trov:hasLocus"]) == 3
+        assert len(arrangements[0]["trov:hasArtifactLocation"]) == 3
 
         # Verify final arrangement has more files (added filtered_output.csv and summary.json)
-        assert len(arrangements[1]["trov:hasLocus"]) == 5
+        assert len(arrangements[1]["trov:hasArtifactLocation"]) == 5
 
         # Verify file locations in final arrangement
         final_locations = [
-            loc["trov:hasLocation"] for loc in arrangements[1]["trov:hasLocus"]
+            loc["trov:path"] for loc in arrangements[1]["trov:hasArtifactLocation"]
         ]
         assert "filtered_output.csv" in final_locations
         assert "summary.json" in final_locations

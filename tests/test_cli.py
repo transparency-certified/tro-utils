@@ -136,8 +136,8 @@ class TestArrangementCommands:
         with open(tro_file) as f:
             data = json.load(f)
             locations = [
-                loc["trov:hasLocation"]
-                for loc in data["@graph"][0]["trov:hasArrangement"][0]["trov:hasLocus"]
+                loc["trov:path"]
+                for loc in data["@graph"][0]["trov:hasArrangement"][0]["trov:hasArtifactLocation"]
             ]
             assert not any(".git" in loc for loc in locations)
 
