@@ -328,7 +328,7 @@ class TRO:
         sha256 = hashlib.sha256()
         filepath_obj = pathlib.Path(filepath)
         if not filepath_obj.is_file() or filepath_obj.is_symlink():
-            return ""
+            return "none:"
         with open(filepath, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256.update(chunk)
