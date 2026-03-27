@@ -10,16 +10,15 @@ from rich.table import Table
 from . import TRPAttribute
 from .models.arrangement import ArtifactArrangement
 from .models.composition import ArtifactComposition
-from .models.performance import ArrangementRef
 from .tro_utils import TRO
 
 console = Console()
 
 
-def _parse_arrangement_ref(value: str) -> ArrangementRef:
-    """Parse ``ARRANGEMENT_ID`` or ``ARRANGEMENT_ID:MOUNT_PATH`` into an :class:`ArrangementRef`."""
+def _parse_arrangement_ref(value: str) -> tuple[str, str | None]:
+    """Parse ``ARRANGEMENT_ID`` or ``ARRANGEMENT_ID:MOUNT_PATH`` into a ``(id, path)`` tuple."""
     arrangement_id, _, path = value.partition(":")
-    return ArrangementRef(arrangement_id=arrangement_id, path=path or None)
+    return (arrangement_id, path or None)
 
 
 _TEMPLATES = {

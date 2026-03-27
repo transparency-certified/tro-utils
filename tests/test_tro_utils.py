@@ -16,7 +16,6 @@ from tro_utils.models import (
     ArtifactArrangement,
     ArtifactComposition,
     ArtifactLocation,
-    ArrangementRef,
     CompositionFingerprint,
     HashValue,
     PerformanceAttribute,
@@ -461,8 +460,11 @@ class TestTROPerformances:
         assert perf["rdfs:comment"] == "Data processing workflow"
         assert perf["trov:startedAtTime"] == "2024-01-01T10:00:00"
         assert perf["trov:endedAtTime"] == "2024-01-01T11:00:00"
-        assert perf["trov:accessedArrangement"]["@id"] == "arrangement/0"
-        assert perf["trov:contributedToArrangement"]["@id"] == "arrangement/1"
+        accessed = perf["trov:accessedArrangement"]
+        assert accessed["@type"] == "trov:ArrangementBinding"
+        assert accessed["trov:arrangement"]["@id"] == "arrangement/0"
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["trov:arrangement"]["@id"] == "arrangement/1"
         assert len(perf["trov:hasPerformanceAttribute"]) == 2
 
     def test_add_performance_invalid_arrangement(
@@ -520,11 +522,14 @@ class TestTROPerformances:
         accessed = perf["trov:accessedArrangement"]
         assert isinstance(accessed, list)
         assert len(accessed) == 2
-        assert {r["@id"] for r in accessed} == {"arrangement/0", "arrangement/1"}
+        assert {r["trov:arrangement"]["@id"] for r in accessed} == {
+            "arrangement/0",
+            "arrangement/1",
+        }
         # One contributed → serialised as a plain dict
         contributed = perf["trov:contributedToArrangement"]
         assert isinstance(contributed, dict)
-        assert contributed["@id"] == "arrangement/2"
+        assert contributed["trov:arrangement"]["@id"] == "arrangement/2"
 
     def test_add_performance_multiple_arrangements_invalid(
         self, tmp_path, gpg_setup, trs_profile
@@ -549,7 +554,7 @@ class TestTROPerformances:
     def test_add_performance_arrangement_ref_with_path(
         self, temp_workspace, tmp_path, gpg_setup, trs_profile
     ):
-        """ArrangementRef objects with path are accepted and serialise trov:mountPath."""
+        """A (arrangement_id, path) tuple is accepted and serialises trov:boundTo."""
         tro = create_tro_with_gpg(
             filepath=str(tmp_path / "test_tro.jsonld"),
             gpg_setup=gpg_setup,
@@ -563,24 +568,24 @@ class TestTROPerformances:
             start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
             end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
             comment="with path",
-            accessed_arrangement=ArrangementRef("arrangement/0", path="/mnt/data"),
+            accessed_arrangement=("arrangement/0", "/mnt/data"),
             modified_arrangement="arrangement/1",
             attrs=[],
         )
 
         perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
         accessed = perf["trov:accessedArrangement"]
-        assert accessed["@id"] == "arrangement/0"
-        assert accessed["trov:mountPath"] == "/mnt/data"
+        assert accessed["trov:arrangement"]["@id"] == "arrangement/0"
+        assert accessed["trov:boundTo"] == "/mnt/data"
         # contributed has no path
         contributed = perf["trov:contributedToArrangement"]
-        assert contributed["@id"] == "arrangement/1"
-        assert "trov:mountPath" not in contributed
+        assert contributed["trov:arrangement"]["@id"] == "arrangement/1"
+        assert "trov:boundTo" not in contributed
 
     def test_add_performance_mixed_strings_and_refs(
         self, temp_workspace, tmp_path, gpg_setup, trs_profile
     ):
-        """A mixed list of str and ArrangementRef is accepted; mountPaths serialised where set."""
+        """A mixed list of str and (id, path) tuples is accepted; boundTo serialised where set."""
         tro = create_tro_with_gpg(
             filepath=str(tmp_path / "test_tro.jsonld"),
             gpg_setup=gpg_setup,
@@ -597,10 +602,10 @@ class TestTROPerformances:
             end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
             comment="mixed",
             accessed_arrangement=[
-                ArrangementRef("arrangement/0", path="/mnt/input"),
+                ("arrangement/0", "/mnt/input"),
                 "arrangement/1",
             ],
-            modified_arrangement=ArrangementRef("arrangement/2", path="/mnt/output"),
+            modified_arrangement=("arrangement/2", "/mnt/output"),
             attrs=[],
         )
 
@@ -608,12 +613,12 @@ class TestTROPerformances:
         accessed = perf["trov:accessedArrangement"]
         assert isinstance(accessed, list)
         assert len(accessed) == 2
-        by_id = {r["@id"]: r for r in accessed}
-        assert by_id["arrangement/0"]["trov:mountPath"] == "/mnt/input"
-        assert "trov:mountPath" not in by_id["arrangement/1"]
+        by_id = {r["trov:arrangement"]["@id"]: r for r in accessed}
+        assert by_id["arrangement/0"]["trov:boundTo"] == "/mnt/input"
+        assert "trov:boundTo" not in by_id["arrangement/1"]
         contributed = perf["trov:contributedToArrangement"]
-        assert contributed["@id"] == "arrangement/2"
-        assert contributed["trov:mountPath"] == "/mnt/output"
+        assert contributed["trov:arrangement"]["@id"] == "arrangement/2"
+        assert contributed["trov:boundTo"] == "/mnt/output"
 
 
 class TestTROSigning:
@@ -1053,9 +1058,13 @@ class TestRealWorldWorkflow:
         performances = tro.data["@graph"][0]["trov:hasPerformance"]
         assert len(performances) == 1
         assert "threshold=150" in performances[0]["rdfs:comment"]
-        assert performances[0]["trov:accessedArrangement"]["@id"] == "arrangement/0"
         assert (
-            performances[0]["trov:contributedToArrangement"]["@id"] == "arrangement/1"
+            performances[0]["trov:accessedArrangement"]["trov:arrangement"]["@id"]
+            == "arrangement/0"
+        )
+        assert (
+            performances[0]["trov:contributedToArrangement"]["trov:arrangement"]["@id"]
+            == "arrangement/1"
         )
 
         # Verify composition has unique artifacts
@@ -1493,7 +1502,7 @@ class TestReplicationPackageVerification:
         assert len(extra) == 0
 
     def test_get_arrangement_path_hash_map(self, temp_workspace, tmp_path, gpg_setup):
-        """Test getting the path-to-hash mapping for an arrangement."""
+        """Test getting the path-to-hash binding for an arrangement."""
         tro = create_tro_with_gpg(
             filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
         )
@@ -1501,10 +1510,10 @@ class TestReplicationPackageVerification:
         # Add arrangement
         tro.add_arrangement(str(temp_workspace), comment="Test", ignore_dirs=[])
 
-        # Get the mapping
+        # Get the binding
         path_hash_map = tro.get_arrangement_path_hash_map("arrangement/0")
 
-        # Verify mapping contains all files
+        # Verify binding contains all files
         assert len(path_hash_map) == 3
         assert "input_data.csv" in path_hash_map
         assert "notes.txt" in path_hash_map
@@ -1524,7 +1533,7 @@ class TestReplicationPackageVerification:
             filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
         )
 
-        # Try to get mapping for non-existent arrangement
+        # Try to get binding for non-existent arrangement
         with pytest.raises(ValueError, match="not found"):
             tro.get_arrangement_path_hash_map("arrangement/99")
 
@@ -1774,10 +1783,10 @@ class TestArtifactArrangement:
 
         comp = ArtifactComposition()
         arr = ArtifactArrangement.from_directory(d, comp, "arrangement/0")
-        mapping = arr.to_path_hash_map(comp)
+        binding = arr.to_path_hash_map(comp)
 
-        assert "file.txt" in mapping
-        assert mapping["file.txt"].startswith("sha256:")
+        assert "file.txt" in binding
+        assert binding["file.txt"].startswith("sha256:")
 
     def test_to_from_jsonld_roundtrip(self):
         arr = ArtifactArrangement(
@@ -2035,14 +2044,20 @@ class TestTrustedResearchPerformance:
     """Unit tests for TrustedResearchPerformance."""
 
     def test_to_from_jsonld_roundtrip(self):
+        from tro_utils.models import ArrangementBinding
+
         trp = TrustedResearchPerformance(
             performance_id="trp/0",
             comment="test run",
             conducted_by_id="trs",
             started_at=datetime.datetime(2024, 1, 1, 10, 0, 0),
             ended_at=datetime.datetime(2024, 1, 1, 11, 0, 0),
-            accessed_arrangements=[ArrangementRef("arrangement/0", path="/workdir")],
-            contributed_to_arrangements=[ArrangementRef("arrangement/1")],
+            accessed_arrangements=[
+                ArrangementBinding("trp/0/binding/0", "arrangement/0", path="/workdir")
+            ],
+            contributed_to_arrangements=[
+                ArrangementBinding("trp/0/binding/1", "arrangement/1")
+            ],
             attributes=[
                 PerformanceAttribute(
                     "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"

@@ -19,7 +19,7 @@ from .arrangement import ArtifactArrangement
 from .attribute import TROAttribute
 from .composition import ArtifactComposition
 from .performance import (
-    ArrangementRef,
+    ArrangementBinding,
     PerformanceAttribute,
     TrustedResearchPerformance,
 )
@@ -154,8 +154,8 @@ class TransparentResearchObject(TROVModel):
         start_time: datetime.datetime,
         end_time: datetime.datetime,
         comment: str | None = None,
-        accessed_arrangement: "str | ArrangementRef | list[str | ArrangementRef] | None" = None,
-        modified_arrangement: "str | ArrangementRef | list[str | ArrangementRef] | None" = None,
+        accessed_arrangement: "str | tuple[str, str | None] | list[str | tuple[str, str | None]] | None" = None,
+        modified_arrangement: "str | tuple[str, str | None] | list[str | tuple[str, str | None]] | None" = None,
         attrs: list | None = None,
         extra_attributes: dict[str, Any] | None = None,
     ) -> TrustedResearchPerformance:
@@ -168,9 +168,8 @@ class TransparentResearchObject(TROVModel):
             end_time: When execution ended.
             comment: Human-readable description.
             accessed_arrangement: Input arrangement(s).  Each item may be a
-                bare ``@id`` string or an :class:`ArrangementRef` (which also
-                carries an optional ``path`` mount point).  A single value or
-                a list is accepted.
+                bare ``@id`` string or a ``(arrangement_id, mount_path)`` tuple.
+                A single value or a list is accepted.
             modified_arrangement: Output arrangement(s).  Same flexible input
                 as *accessed_arrangement*.
             attrs: List of :class:`~tro_utils.TRPAttribute` members (or their
@@ -195,34 +194,29 @@ class TransparentResearchObject(TROVModel):
         if extra_attributes is None:
             extra_attributes = {}
 
-        def _normalise(value: Any) -> list[ArrangementRef]:
-            """Accept str | ArrangementRef | list[str | ArrangementRef] | None."""
+        def _normalise_refs(value: Any) -> list[tuple[str, str | None]]:
+            """Accept str | (str, str|None) | list[...] | None → list[(arrangement_id, path)]."""
             if value is None:
                 return []
-            if isinstance(value, (str, ArrangementRef)):
+            if isinstance(value, (str, tuple)):
                 value = [value]
-            return [
-                item
-                if isinstance(item, ArrangementRef)
-                else ArrangementRef(arrangement_id=item)
-                for item in value
-            ]
+            return [item if isinstance(item, tuple) else (item, None) for item in value]
 
-        accessed_refs = _normalise(accessed_arrangement)
-        modified_refs = _normalise(modified_arrangement)
+        accessed_refs = _normalise_refs(accessed_arrangement)
+        modified_refs = _normalise_refs(modified_arrangement)
 
         available_ids = {arr.arrangement_id for arr in self.arrangements}
 
-        for ref in accessed_refs:
-            if ref.arrangement_id not in available_ids:
+        for arr_id, _ in accessed_refs:
+            if arr_id not in available_ids:
                 raise ValueError(
-                    f"Arrangement {ref.arrangement_id!r} does not exist. "
+                    f"Arrangement {arr_id!r} does not exist. "
                     f"Available: {sorted(available_ids)}"
                 )
-        for ref in modified_refs:
-            if ref.arrangement_id not in available_ids:
+        for arr_id, _ in modified_refs:
+            if arr_id not in available_ids:
                 raise ValueError(
-                    f"Arrangement {ref.arrangement_id!r} does not exist. "
+                    f"Arrangement {arr_id!r} does not exist. "
                     f"Available: {sorted(available_ids)}"
                 )
 
@@ -231,6 +225,32 @@ class TransparentResearchObject(TROVModel):
         }
 
         performance_id = f"trp/{len(self.performances)}"
+
+        # Build ArrangementBinding objects with auto-generated IDs.  A single
+        # counter across both lists keeps IDs unique within the performance.
+        binding_idx = 0
+        accessed_bindings: list[ArrangementBinding] = []
+        for arr_id, path in accessed_refs:
+            accessed_bindings.append(
+                ArrangementBinding(
+                    binding_id=f"{performance_id}/binding/{binding_idx}",
+                    arrangement_id=arr_id,
+                    path=path,
+                )
+            )
+            binding_idx += 1
+
+        modified_bindings: list[ArrangementBinding] = []
+        for arr_id, path in modified_refs:
+            modified_bindings.append(
+                ArrangementBinding(
+                    binding_id=f"{performance_id}/binding/{binding_idx}",
+                    arrangement_id=arr_id,
+                    path=path,
+                )
+            )
+            binding_idx += 1
+
         performance_attributes: list[PerformanceAttribute] = []
         for i, attr in enumerate(attrs):
             if isinstance(attr, str):
@@ -255,8 +275,8 @@ class TransparentResearchObject(TROVModel):
             conducted_by_id=self.trs.trs_id,
             started_at=start_time,
             ended_at=end_time,
-            accessed_arrangements=accessed_refs,
-            contributed_to_arrangements=modified_refs,
+            accessed_arrangements=accessed_bindings,
+            contributed_to_arrangements=modified_bindings,
             attributes=performance_attributes,
         )
 

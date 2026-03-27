@@ -303,8 +303,8 @@ class TRO:
         start_time,
         end_time,
         comment=None,
-        accessed_arrangement=None,  # str | ArrangementRef | list[str | ArrangementRef] | None
-        modified_arrangement=None,  # str | ArrangementRef | list[str | ArrangementRef] | None
+        accessed_arrangement=None,  # str | (str, str|None) | list[...] | None
+        modified_arrangement=None,  # str | (str, str|None) | list[...] | None
         attrs=None,
         extra_attributes=None,
     ):

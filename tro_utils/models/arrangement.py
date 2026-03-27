@@ -21,7 +21,7 @@ from .composition import ArtifactComposition
 
 @dataclass
 class ArtifactLocation(TROVModel):
-    """A single (path, artifact) mapping within an arrangement."""
+    """A single (path, artifact) binding within an arrangement."""
 
     location_id: str
     artifact_id: str
@@ -158,7 +158,7 @@ class ArtifactArrangement(TROVModel):
         return f"sha256:{sha256.hexdigest()}"
 
     def to_path_hash_map(self, composition: ArtifactComposition) -> dict[str, str]:
-        """Return a ``{relative_path: "sha256:<hex>"}`` mapping.
+        """Return a ``{relative_path: "sha256:<hex>"}`` binding.
 
         Requires the corresponding :class:`ArtifactComposition` to resolve
         artifact IDs to hash strings.

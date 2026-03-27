@@ -136,16 +136,30 @@ tro.add_performance(
 ```
 
 The `accessed_arrangement` and `modified_arrangement` parameters accept a single `str`,
-a `list[str]`, or `None`.
+a `(arrangement_id, mount_path)` tuple, a list of either, or `None`.
 
 ---
 
-## `ArrangementRef` and mount paths
+## Mount paths and `ArrangementBinding`
 
-Each entry in `accessed_arrangements` / `contributed_to_arrangements` on a
-`TrustedResearchPerformance` is an `ArrangementRef` — a small object that pairs an arrangement
-`@id` with an optional `path` indicating the mount point (the directory that arrangement paths
-are relative to).
+The same arrangement can be mounted at different paths in different performances (e.g.
+`/input` in one run and `/output` in another).  To represent this unambiguously in RDF,
+each reference is wrapped in an intermediate `trov:ArrangementBinding` object that ties the
+arrangement, the mount path, and the performance together.
+
+```json
+"trov:accessedArrangement": [
+  {
+    "@id": "trp/0/binding/0",
+    "@type": "trov:ArrangementBinding",
+    "trov:arrangement": { "@id": "arrangement/0" },
+    "trov:boundTo": "/mnt/input"
+  }
+]
+```
+
+Binding IDs are generated automatically when you call `add_performance`.
+The `boundTo` field is optional — omit it when the path is not meaningful.
 
 ### CLI — `ARRANGEMENT_ID:MOUNT_PATH` syntax
 
@@ -160,58 +174,40 @@ tro-utils --declaration my.jsonld performance add \
   -M arrangement/2:/mnt/output
 ```
 
-Entries without a `:` are plain arrangement IDs (no mount path recorded). The two forms
+Entries without a `:` are plain arrangement IDs (no mount path recorded).  The two forms
 can be mixed freely in a single command.
 
 ### Python API
 
-Pass `ArrangementRef` objects directly to `add_performance`:
+`add_performance` accepts each arrangement as either a plain `str` (no mount path)
+or a `(arrangement_id, mount_path)` tuple:
 
 ```python
-from tro_utils.models import ArrangementRef
-
 tro.add_performance(
     start_time=start,
     end_time=end,
     comment="Containerised run",
-    # Mix ArrangementRef objects and plain strings freely
     accessed_arrangement=[
-        ArrangementRef("arrangement/0", path="/mnt/input"),
-        "arrangement/1",                                   # path omitted
+        ("arrangement/0", "/mnt/input"),  # tuple: (id, boundTo path)
+        "arrangement/1",                  # plain string: no path
     ],
-    modified_arrangement=ArrangementRef("arrangement/2", path="/mnt/output"),
+    modified_arrangement=("arrangement/2", "/mnt/output"),
     attrs=[TRPAttribute.NET_ISOLATION],
 )
 ```
 
-You can also construct `ArrangementRef` objects directly when building a model:
+A single value or a list is accepted for both parameters.
+
+The resolved `ArrangementBinding` objects are stored on
+`TrustedResearchPerformance.accessed_arrangements` and
+`TrustedResearchPerformance.contributed_to_arrangements`:
 
 ```python
-from tro_utils.models import ArrangementRef, TrustedResearchPerformance
-
-perf = TrustedResearchPerformance(
-    performance_id="trp/0",
-    accessed_arrangements=[
-        ArrangementRef(arrangement_id="arrangement/0", path="/mnt/data"),
-        ArrangementRef(arrangement_id="arrangement/1", path="/mnt/reference"),
-    ],
-    contributed_to_arrangements=[
-        ArrangementRef(arrangement_id="arrangement/2"),  # path is optional
-    ],
-)
+for binding in perf.accessed_arrangements:
+    print(binding.binding_id)       # e.g. "trp/0/binding/0"
+    print(binding.arrangement_id)   # e.g. "arrangement/0"
+    print(binding.path)             # e.g. "/mnt/input"  (or None)
 ```
-
-In JSON-LD, a ref with a path serialises as:
-
-```json
-{
-  "@id": "arrangement/0",
-  "trov:mountPath": "/mnt/data"
-}
-```
-
-A ref without a path serialises as `{ "@id": "arrangement/0" }`, preserving backwards
-compatibility with existing TRO files that contain plain `@id`-only objects.
 
 ---
 
@@ -247,8 +243,8 @@ tro.add_performance(
     end_time=datetime(2024, 3, 2, 10, 0, 11),
     comment="My workflow run",
     attrs=["trov:InternetIsolation"],
-    accessed_arrangement="arrangement/0",   # str, list[str], or None
-    modified_arrangement="arrangement/1",   # str, list[str], or None
+    accessed_arrangement="arrangement/0",   # str | (id, path) tuple | list | None
+    modified_arrangement="arrangement/1",   # str | (id, path) tuple | list | None
 )
 
 # Save, sign, and timestamp
@@ -318,8 +314,8 @@ TransparentResearchObject          tro.py
 ├── ArtifactArrangement[]          arrangement.py
 │   └── ArtifactLocation[]         arrangement.py
 ├── TrustedResearchPerformance[]   performance.py
-│   ├── ArrangementRef[]           performance.py  (accessed_arrangements)
-│   ├── ArrangementRef[]           performance.py  (contributed_to_arrangements)
+│   ├── ArrangementBinding[]       performance.py  (accessed_arrangements)
+│   ├── ArrangementBinding[]       performance.py  (contributed_to_arrangements)
 │   └── PerformanceAttribute[]     performance.py
 └── TROAttribute[]                 attribute.py
 ```
