@@ -14,21 +14,18 @@ import os
 import pathlib
 import subprocess
 import tempfile
-import zipfile
 
 import gnupg
 from jinja2 import Template
 import requests
 import rfc3161ng
 import graphviz
-from packaging.version import Version
 from pyasn1.codec.der import encoder
 
 from .models import TransparentResearchObject
 from .models.trs import TrustedResearchSystem
 
 GPG_HOME = os.environ.get("GPG_HOME")
-TROV_VOCABULARY_VERSION = Version("0.1")
 
 
 class TRO:
@@ -150,47 +147,6 @@ class TRO:
                     )
         raise ValueError(f"Artifact {artifact} does not contain a recognizable hash")
 
-    def get_hash_mapping(self):
-        return {
-            artifact.hash.to_string(): {
-                "@id": artifact.artifact_id,
-                "trov:mimeType": artifact.mime_type,
-            }
-            for artifact in self._model.composition.artifacts
-        }
-
-    @staticmethod
-    def calculate_fingerprint(artifacts):
-        hashes = []
-        for art in artifacts:
-            if "trov:sha256" in art:
-                hashes.append(art["trov:sha256"])
-            elif "trov:hash" in art and isinstance(art["trov:hash"], dict):
-                hashes.append(art["trov:hash"]["trov:hashValue"])
-            elif "trov:hash" in art and isinstance(art["trov:hash"], list):
-                hashes += [_["trov:hashValue"] for _ in art["trov:hash"]]
-        return hashlib.sha256("".join(sorted(hashes)).encode("utf-8")).hexdigest()
-
-    def update_composition(self, composition):
-        """Rebuild the model composition from the legacy hash-map format."""
-        from .models.artifact import ResearchArtifact
-        from .models.hash_value import HashValue
-
-        artifacts = [
-            ResearchArtifact(
-                artifact_id=value["@id"],
-                hash=HashValue(
-                    algorithm=key.split(":")[0],
-                    value=key.split(":")[1],
-                ),
-                mime_type=value["trov:mimeType"],
-            )
-            for key, value in composition.items()
-        ]
-        artifacts.sort(key=lambda a: a.artifact_id)
-        self._model.composition.artifacts = artifacts
-        self._model.composition._recompute_fingerprint()
-
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
@@ -227,19 +183,8 @@ class TRO:
     @staticmethod
     def sha256_for_file(filepath, resolve_symlinks=True):
         from .models.arrangement import ArtifactArrangement
-        return ArtifactArrangement._sha256_for_file(filepath, resolve_symlinks)
 
-    def sha256_for_directory(self, directory, ignore_dirs=None, resolve_symlinks=True):
-        if ignore_dirs is None:
-            ignore_dirs = [".git"]
-        hashes = {}
-        for root, dirs, files in os.walk(directory):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs]
-            for filename in files:
-                filepath = str(pathlib.Path(root) / filename)
-                hash_value = self.sha256_for_file(filepath, resolve_symlinks)
-                hashes[filepath] = hash_value
-        return hashes
+        return ArtifactArrangement._sha256_for_file(filepath, resolve_symlinks)
 
     # ------------------------------------------------------------------
     # Signing and timestamping
@@ -339,62 +284,26 @@ class TRO:
     # ------------------------------------------------------------------
 
     def verify_replication_package(self, arrangement_id, package, subpath=None):
-        files_missing_in_arrangement = []
-        mismatched_hashes = []
+        from .replication_package import ReplicationPackage
 
-        arrangement_map = self.get_arrangement_path_hash_map(arrangement_id)
-
-        def iterate_package_files():
-            if pathlib.Path(package).is_dir():
-                package_path = pathlib.Path(package)
-                for root, dirs, files in os.walk(package):
-                    for filename in files:
-                        filepath = pathlib.Path(root) / filename
-                        relative_filename = filepath.relative_to(
-                            package_path
-                        ).as_posix()
-                        yield relative_filename, self.sha256_for_file(str(filepath))
-            else:
-                with zipfile.ZipFile(package, "r") as zf:
-                    for fileinfo in zf.infolist():
-                        sha256 = hashlib.sha256()
-                        with zf.open(fileinfo.filename) as f:
-                            for chunk in iter(lambda: f.read(4096), b""):
-                                sha256.update(chunk)
-                        file_hash = f"sha256:{sha256.hexdigest()}"
-                        yield fileinfo.filename, file_hash
-
-        for original_filename, file_hash in iterate_package_files():
-            relative_filename = original_filename
-
-            if subpath is not None:
-                import pathlib as _pl
-                original_path = _pl.PurePosixPath(original_filename)
-                subpath_posix = _pl.PurePosixPath(subpath)
-                try:
-                    relative_filename = original_path.relative_to(
-                        subpath_posix
-                    ).as_posix()
-                except ValueError:
-                    continue
-
-            if relative_filename not in arrangement_map:
-                files_missing_in_arrangement.append(relative_filename)
-
-            expected_hash = arrangement_map.pop(relative_filename, None)
-            if file_hash != expected_hash:
-                mismatched_hashes.append((relative_filename, expected_hash, file_hash))
-
-        dirty = (
-            files_missing_in_arrangement
-            or mismatched_hashes
-            or len(arrangement_map) > 0
+        arrangement = next(
+            (a for a in self._model.arrangements if a.arrangement_id == arrangement_id),
+            None,
+        )
+        if arrangement is None:
+            available = [a.arrangement_id for a in self._model.arrangements]
+            raise ValueError(
+                f"Arrangement '{arrangement_id}' not found. "
+                f"Available arrangements: {available}"
+            )
+        result = ReplicationPackage.verify(
+            arrangement, self._model.composition, package, subpath
         )
         return (
-            files_missing_in_arrangement,
-            mismatched_hashes,
-            list(arrangement_map.keys()),
-            not dirty,
+            result.files_missing_in_arrangement,
+            result.mismatched_hashes,
+            result.files_missing_in_package,
+            result.is_valid,
         )
 
     # ------------------------------------------------------------------

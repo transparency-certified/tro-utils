@@ -621,24 +621,6 @@ class TestTROHashingAndComposition:
         )
         assert hash_value == expected_hash
 
-    def test_sha256_for_directory(self, temp_workspace, tmp_path, gpg_setup):
-        """Test computing SHA256 hashes for all files in a directory."""
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        hashes = tro.sha256_for_directory(str(temp_workspace), ignore_dirs=[])
-
-        # Verify we got hashes for all files
-        assert len(hashes) == 3  # 3 files in workspace
-
-        # Verify all hashes are non-empty
-        for filepath, hash_value in hashes.items():
-            assert hash_value.startswith("sha256:")
-            assert (
-                len(hash_value[len("sha256:") :]) == 64
-            )  # SHA256 produces 64 hex characters
-
     def test_composition_fingerprint(self, temp_workspace, tmp_path, gpg_setup):
         """Test that composition fingerprint is computed correctly."""
         tro = create_tro_with_gpg(
@@ -977,24 +959,6 @@ class TestTROUtilityMethods:
 
         with pytest.raises(ValueError, match="does not contain"):
             tro._get_hash({})
-
-    def test_fingerprint(self, tmp_path, gpg_setup):
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        artifacts = [
-            {"trov:sha256": "abc123"},
-            {"trov:hash": {"trov:hashAlgorithm": "sha256", "trov:hashValue": "def456"}},
-            {
-                "trov:hash": [
-                    {"trov:hashAlgorithm": "sha256", "trov:hashValue": "abc123"},
-                    {"trov:hashAlgorithm": "sha512", "trov:hashValue": "def456"},
-                ]
-            },
-        ]
-        fingerprint = tro.calculate_fingerprint(artifacts)
-        assert fingerprint == sha256("abc123abc123def456def456".encode()).hexdigest()
 
 
 class TestReplicationPackageVerification:
