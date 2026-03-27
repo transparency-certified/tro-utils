@@ -206,7 +206,7 @@ In JSON-LD, a ref with a path serialises as:
 ```json
 {
   "@id": "arrangement/0",
-  "trov:path": "/mnt/data"
+  "trov:mountPath": "/mnt/data"
 }
 ```
 

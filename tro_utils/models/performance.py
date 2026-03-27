@@ -28,14 +28,14 @@ class ArrangementRef(TROVModel):
     def to_jsonld(self) -> dict[str, Any]:
         result: dict[str, Any] = {"@id": self.arrangement_id}
         if self.path is not None:
-            result["trov:path"] = self.path
+            result["trov:mountPath"] = self.path
         return result
 
     @classmethod
     def from_jsonld(cls, data: dict[str, Any]) -> "ArrangementRef":
         return cls(
             arrangement_id=data["@id"],
-            path=data.get("trov:path"),
+            path=data.get("trov:mountPath"),
         )
 
 

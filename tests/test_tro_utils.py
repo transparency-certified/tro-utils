@@ -549,7 +549,7 @@ class TestTROPerformances:
     def test_add_performance_arrangement_ref_with_path(
         self, temp_workspace, tmp_path, gpg_setup, trs_profile
     ):
-        """ArrangementRef objects with path are accepted and serialise trov:path."""
+        """ArrangementRef objects with path are accepted and serialise trov:mountPath."""
         tro = create_tro_with_gpg(
             filepath=str(tmp_path / "test_tro.jsonld"),
             gpg_setup=gpg_setup,
@@ -571,16 +571,16 @@ class TestTROPerformances:
         perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
         accessed = perf["trov:accessedArrangement"]
         assert accessed["@id"] == "arrangement/0"
-        assert accessed["trov:path"] == "/mnt/data"
+        assert accessed["trov:mountPath"] == "/mnt/data"
         # contributed has no path
         contributed = perf["trov:contributedToArrangement"]
         assert contributed["@id"] == "arrangement/1"
-        assert "trov:path" not in contributed
+        assert "trov:mountPath" not in contributed
 
     def test_add_performance_mixed_strings_and_refs(
         self, temp_workspace, tmp_path, gpg_setup, trs_profile
     ):
-        """A mixed list of str and ArrangementRef is accepted; paths serialised where set."""
+        """A mixed list of str and ArrangementRef is accepted; mountPaths serialised where set."""
         tro = create_tro_with_gpg(
             filepath=str(tmp_path / "test_tro.jsonld"),
             gpg_setup=gpg_setup,
@@ -609,11 +609,11 @@ class TestTROPerformances:
         assert isinstance(accessed, list)
         assert len(accessed) == 2
         by_id = {r["@id"]: r for r in accessed}
-        assert by_id["arrangement/0"]["trov:path"] == "/mnt/input"
-        assert "trov:path" not in by_id["arrangement/1"]
+        assert by_id["arrangement/0"]["trov:mountPath"] == "/mnt/input"
+        assert "trov:mountPath" not in by_id["arrangement/1"]
         contributed = perf["trov:contributedToArrangement"]
         assert contributed["@id"] == "arrangement/2"
-        assert contributed["trov:path"] == "/mnt/output"
+        assert contributed["trov:mountPath"] == "/mnt/output"
 
 
 class TestTROSigning:
