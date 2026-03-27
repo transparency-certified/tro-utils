@@ -55,7 +55,7 @@ Ready to contribute? Here's how to set up `tro_utils` for local development.
    ```bash
    $ mkvirtualenv tro_utils
    $ cd tro_utils/
-   $ python setup.py develop
+   $ pip install -e .
    ```
 
 4. Create a branch for local development:
@@ -70,7 +70,7 @@ Ready to contribute? Here's how to set up `tro_utils` for local development.
 
    ```bash
    $ flake8 tro_utils tests
-   $ python setup.py test or pytest
+   $ pytest
    $ tox
    ```
 

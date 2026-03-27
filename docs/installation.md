@@ -45,5 +45,5 @@ $ curl -OJL https://github.com/Xarthisius/tro_utils/tarball/master
 Once you have a copy of the source, you can install it with:
 
 ```console
-$ python setup.py install
+$ pip install -e .
 ```

@@ -14,7 +14,9 @@ It uses the `Click` library to define commands and options. Here's a summary of 
 
 2. **Commands**: The script defines several commands, each with its own set of options and arguments. The commands include:
 
-   - `verify`: Verifies that the TRO is signed and timestamped correctly.
+   - `verify-timestamp`: Verifies the RFC 3161 timestamp and GPG signature on the TRO.
+
+   - `verify-package`: Verifies a replication package (directory or `.zip`) against the hashes stored in an arrangement.
 
    - `arrangement`: Manages arrangements in the TRO. It has subcommands like `add` (adds a directory as a composition to the TRO) and `list` (lists available arrangements in the TRO).
 
@@ -102,7 +104,7 @@ $ tro-utils --declaration sample_tro.jsonld performance add \
   -A arrangement/0 \
   -M arrangement/1
  $ tro-utils --declaration sample_tro.jsonld sign
- $ tro-utils --declaration sample_tro.jsonld verify
+ $ tro-utils --declaration sample_tro.jsonld verify-timestamp
    ...
    Verification: OK
  $ curl -LO https://raw.githubusercontent.com/craig-willis/trace-report/main/templates/tro.md.jinja2
