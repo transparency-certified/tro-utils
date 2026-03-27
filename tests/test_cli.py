@@ -556,13 +556,19 @@ class TestCLIPerformance:
         with open(tro_file) as f:
             data = json.load(f)
         perf = data["@graph"][0]["trov:hasPerformance"][0]
-        assert perf["trov:accessedArrangement"]["@id"] == "arrangement/0"
-        assert perf["trov:contributedToArrangement"]["@id"] == "arrangement/1"
+        assert (
+            perf["trov:accessedArrangement"]["trov:arrangement"]["@id"]
+            == "arrangement/0"
+        )
+        assert (
+            perf["trov:contributedToArrangement"]["trov:arrangement"]["@id"]
+            == "arrangement/1"
+        )
 
     def test_performance_add_id_with_path(
         self, runner, tmp_path, temp_workspace, trs_profile
     ):
-        """ARRANGEMENT_ID:PATH syntax is parsed and serialised as trov:mountPath."""
+        """ARRANGEMENT_ID:PATH syntax is parsed and serialised as trov:boundTo."""
         tro_file = tmp_path / "test_tro.jsonld"
         self._setup_tro_with_arrangements(
             runner,
@@ -593,11 +599,11 @@ class TestCLIPerformance:
             data = json.load(f)
         perf = data["@graph"][0]["trov:hasPerformance"][0]
         accessed = perf["trov:accessedArrangement"]
-        assert accessed["@id"] == "arrangement/0"
-        assert accessed["trov:mountPath"] == "/mnt/input"
+        assert accessed["trov:arrangement"]["@id"] == "arrangement/0"
+        assert accessed["trov:boundTo"] == "/mnt/input"
         contributed = perf["trov:contributedToArrangement"]
-        assert contributed["@id"] == "arrangement/1"
-        assert contributed["trov:mountPath"] == "/mnt/output"
+        assert contributed["trov:arrangement"]["@id"] == "arrangement/1"
+        assert contributed["trov:boundTo"] == "/mnt/output"
 
     def test_performance_add_multiple_accessed_with_paths(
         self, runner, tmp_path, temp_workspace, trs_profile
@@ -652,6 +658,6 @@ class TestCLIPerformance:
         accessed = perf["trov:accessedArrangement"]
         assert isinstance(accessed, list)
         assert len(accessed) == 2
-        by_id = {r["@id"]: r for r in accessed}
-        assert by_id["arrangement/0"]["trov:mountPath"] == "/mnt/a"
-        assert "trov:mountPath" not in by_id["arrangement/1"]
+        by_id = {r["trov:arrangement"]["@id"]: r for r in accessed}
+        assert by_id["arrangement/0"]["trov:boundTo"] == "/mnt/a"
+        assert "trov:boundTo" not in by_id["arrangement/1"]

@@ -10,7 +10,7 @@ from .attribute import TROAttribute
 from .performance import (
     TrustedResearchPerformance,
     PerformanceAttribute,
-    ArrangementRef,
+    ArrangementBinding,
 )
 from .tro import TransparentResearchObject
 
@@ -27,6 +27,6 @@ __all__ = [
     "TROAttribute",
     "TrustedResearchPerformance",
     "PerformanceAttribute",
-    "ArrangementRef",
+    "ArrangementBinding",
     "TransparentResearchObject",
 ]

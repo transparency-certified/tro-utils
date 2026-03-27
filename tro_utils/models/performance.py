@@ -10,14 +10,19 @@ from ._base import TROVModel
 
 
 @dataclass
-class ArrangementRef(TROVModel):
-    """A reference to an :class:`~tro_utils.models.arrangement.ArtifactArrangement`.
+class ArrangementBinding(TROVModel):
+    """Maps an arrangement to a specific mount path for a particular performance.
 
-    Used by :class:`TrustedResearchPerformance` to record which arrangements
-    were accessed or contributed to.  ``path`` indicates the mount / working
-    directory that arrangement paths are relative to.
+    An intermediate RDF object (``trov:ArrangementBinding``) that associates an
+    :class:`~tro_utils.models.arrangement.ArtifactArrangement` with a mount path
+    scoped to one :class:`TrustedResearchPerformance`, avoiding the ambiguity that
+    arises when the same arrangement is mounted at different paths in different
+    performances.
+
+    Analogous to ``trov:ArtifactLocation`` for arrangements.
     """
 
+    binding_id: str
     arrangement_id: str
     path: str | None = None
 
@@ -26,16 +31,21 @@ class ArrangementRef(TROVModel):
     # ------------------------------------------------------------------
 
     def to_jsonld(self) -> dict[str, Any]:
-        result: dict[str, Any] = {"@id": self.arrangement_id}
+        result: dict[str, Any] = {
+            "@id": self.binding_id,
+            "@type": "trov:ArrangementBinding",
+            "trov:arrangement": {"@id": self.arrangement_id},
+        }
         if self.path is not None:
-            result["trov:mountPath"] = self.path
+            result["trov:boundTo"] = self.path
         return result
 
     @classmethod
-    def from_jsonld(cls, data: dict[str, Any]) -> "ArrangementRef":
+    def from_jsonld(cls, data: dict[str, Any]) -> "ArrangementBinding":
         return cls(
-            arrangement_id=data["@id"],
-            path=data.get("trov:mountPath"),
+            binding_id=data["@id"],
+            arrangement_id=data["trov:arrangement"]["@id"],
+            path=data.get("trov:boundTo"),
         )
 
 
@@ -79,8 +89,8 @@ class TrustedResearchPerformance(TROVModel):
     conducted_by_id: str = "trs"
     started_at: datetime.datetime | None = None
     ended_at: datetime.datetime | None = None
-    accessed_arrangements: list[ArrangementRef] = field(default_factory=list)
-    contributed_to_arrangements: list[ArrangementRef] = field(default_factory=list)
+    accessed_arrangements: list[ArrangementBinding] = field(default_factory=list)
+    contributed_to_arrangements: list[ArrangementBinding] = field(default_factory=list)
     attributes: list[PerformanceAttribute] = field(default_factory=list)
 
     # ------------------------------------------------------------------
@@ -140,12 +150,12 @@ class TrustedResearchPerformance(TROVModel):
             for attr in data.get("trov:hasPerformanceAttribute", [])
         ]
 
-        def _parse_refs(value: Any) -> list[ArrangementRef]:
+        def _parse_refs(value: Any) -> list[ArrangementBinding]:
             if value is None:
                 return []
             if isinstance(value, list):
-                return [ArrangementRef.from_jsonld(item) for item in value]
-            return [ArrangementRef.from_jsonld(value)]
+                return [ArrangementBinding.from_jsonld(item) for item in value]
+            return [ArrangementBinding.from_jsonld(value)]
 
         return cls(
             performance_id=data["@id"],
