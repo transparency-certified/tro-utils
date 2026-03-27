@@ -8,9 +8,19 @@ from rich.console import Console
 from rich.table import Table
 
 from . import TRPAttribute
+from .models.arrangement import ArtifactArrangement
+from .models.composition import ArtifactComposition
+from .models.performance import ArrangementRef
 from .tro_utils import TRO
 
 console = Console()
+
+
+def _parse_arrangement_ref(value: str) -> ArrangementRef:
+    """Parse ``ARRANGEMENT_ID`` or ``ARRANGEMENT_ID:MOUNT_PATH`` into an :class:`ArrangementRef`."""
+    arrangement_id, _, path = value.partition(":")
+    return ArrangementRef(arrangement_id=arrangement_id, path=path or None)
+
 
 _TEMPLATES = {
     "default": {
@@ -229,34 +239,68 @@ def info(ctx, verbose):
     tro = TRO(
         filepath=declaration,
     )
+    artifact_locs: dict = {}
     if verbose:
-        data = {}
-        for a in tro.list_arrangements():
-            for c in a["trov:hasArtifactLocation"]:
-                key = c["trov:artifact"]["@id"]
-                value = {"@id": c["@id"], "path": c["trov:path"]}
-                if key not in data:
-                    data[key] = [value]
-                else:
-                    data[key].append(value)
+        for arr in tro._model.arrangements:
+            for loc in arr.locations:
+                artifact_locs.setdefault(loc.artifact_id, []).append(
+                    {"@id": loc.location_id, "path": loc.path}
+                )
 
-    for c in tro.get_composition_info()["trov:hasArtifact"]:
-        trov_hash = TRO._get_hash(c)
-        print(c["@id"])
-        print(f"  - mimeType: {c['trov:mimeType']}")
-        print(f"  - {trov_hash}")
+    for artifact in tro._model.composition.artifacts:
+        print(artifact.artifact_id)
+        print(f"  - mimeType: {artifact.mime_type}")
+        print(f"  - {artifact.hash}")
         if verbose:
             print("  - Arrangements:")
-            for a in data.get(c["@id"], []):
+            for a in artifact_locs.get(artifact.artifact_id, []):
                 print(f"    - {a['path']} (id={a['@id']})")
 
 
-@arrangement.command(help="Add a directory as a composition to the TRO")
+@arrangement.command(
+    help="Compute an arrangement snapshot from a directory and save it to a file"
+)
 @click.option("--comment", "-m", type=click.STRING, required=False)
 @click.option("--ignore_dir", "-i", type=click.STRING, required=False, multiple=True)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    required=True,
+    help="Output snapshot file (.jsonld)",
+)
 @click.argument("directory", type=click.Path(exists=True))
+def snapshot(directory, ignore_dir, comment, output):
+    composition = ArtifactComposition()
+    arr = ArtifactArrangement.from_directory(
+        directory=directory,
+        composition=composition,
+        arrangement_id="arrangement/0",
+        comment=comment,
+        ignore_dirs=list(ignore_dir) or None,
+    )
+    arr.save_snapshot(output, composition)
+    click.echo(f"Snapshot saved to {output} ({len(arr.locations)} file(s))")
+
+
+@arrangement.command(
+    help="Add an arrangement to the TRO from a directory or a pre-computed snapshot"
+)
+@click.option("--comment", "-m", type=click.STRING, required=False)
+@click.option("--ignore_dir", "-i", type=click.STRING, required=False, multiple=True)
+@click.option(
+    "--from-snapshot",
+    type=click.Path(exists=True),
+    required=False,
+    help="Load arrangement from a pre-computed snapshot file instead of scanning a directory",
+)
+@click.argument("directory", type=click.Path(exists=True), required=False)
 @click.pass_context
-def add(ctx, directory, ignore_dir, comment):
+def add(ctx, directory, ignore_dir, comment, from_snapshot):
+    if from_snapshot is None and directory is None:
+        raise click.UsageError("Provide either DIRECTORY or --from-snapshot.")
+    if from_snapshot is not None and directory is not None:
+        raise click.UsageError("DIRECTORY and --from-snapshot are mutually exclusive.")
     ctx = ctx.parent.parent
     declaration = ctx.params.get("declaration")
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
@@ -274,7 +318,10 @@ def add(ctx, directory, ignore_dir, comment):
         tro_name=tro_name,
         tro_description=tro_description,
     )
-    tro.add_arrangement(directory, ignore_dirs=ignore_dir, comment=comment)
+    if from_snapshot:
+        tro.add_arrangement_from_snapshot(from_snapshot, comment=comment)
+    else:
+        tro.add_arrangement(directory, ignore_dirs=ignore_dir, comment=comment)
     tro.save()
 
 
@@ -362,10 +409,20 @@ def generate_report(ctx, template, output):
     help="Capabilities of the performance",
 )
 @click.option(
-    "--accessed", "-A", type=click.STRING, required=False, help="Accessed Arrangement"
+    "--accessed",
+    "-A",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Accessed arrangement: ARRANGEMENT_ID or ARRANGEMENT_ID:MOUNT_PATH. May be repeated.",
 )
 @click.option(
-    "--modified", "-M", type=click.STRING, required=False, help="Modified Arrangement"
+    "--modified",
+    "-M",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Modified arrangement: ARRANGEMENT_ID or ARRANGEMENT_ID:MOUNT_PATH. May be repeated.",
 )
 @click.pass_context
 def performance_add(ctx, comment, start, end, attribute, accessed, modified):
@@ -384,8 +441,8 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
         start,
         end,
         comment=comment,
-        accessed_arrangement=accessed,
-        modified_arrangement=modified,
+        accessed_arrangement=[_parse_arrangement_ref(v) for v in accessed] or None,
+        modified_arrangement=[_parse_arrangement_ref(v) for v in modified] or None,
         attrs=attribute,
     )
     tro.save()

@@ -1,4 +1,11 @@
-"""Main module."""
+"""Main module — TRO facade.
+
+The :class:`TRO` class is a thin facade that delegates data-model operations
+to :class:`~tro_utils.models.TransparentResearchObject` while keeping
+signing, timestamping, and report-generation logic here.
+"""
+
+from __future__ import annotations
 
 import base64
 import hashlib
@@ -7,22 +14,19 @@ import os
 import pathlib
 import subprocess
 import tempfile
-import zipfile
 
-import datetime
 import gnupg
 from jinja2 import Template
-import magic
 import requests
 import rfc3161ng
 import graphviz
-from packaging.version import Version
 from pyasn1.codec.der import encoder
 
-from . import TROVCapability, TRPAttribute
+from . import __version__
+from .models import TransparentResearchObject
+from .models.trs import TrustedResearchSystem
 
 GPG_HOME = os.environ.get("GPG_HOME")
-TROV_VOCABULARY_VERSION = Version("0.1")
 
 
 class TRO:
@@ -64,63 +68,28 @@ class TRO:
             }
 
         if not pathlib.Path(self.tro_filename).exists():
-            self.data = {
-                "@context": [
-                    {
-                        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-                        "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-                        "trov": f"https://w3id.org/trace/trov/{TROV_VOCABULARY_VERSION}#",
-                        "schema": "https://schema.org",
-                    }
-                ],
-                "@graph": [
-                    {
-                        "@id": "tro",
-                        "@type": [
-                            "trov:TransparentResearchObject",
-                            "schema:CreativeWork",
-                        ],
-                        "schema:creator": tro_creator or "TRO utils",
-                        "schema:name": tro_name or "Some TRO",
-                        "schema:description": tro_description or "Some description",
-                        "schema:dateCreated": datetime.datetime.now().isoformat(),
-                        "trov:hasArrangement": [],
-                        "trov:hasAttribute": [],
-                        "trov:hasComposition": {
-                            "@id": "composition/1",
-                            "@type": "trov:ArtifactComposition",
-                            "trov:hasArtifact": [],
-                        },
-                        "trov:hasPerformance": [],
-                        "trov:wasAssembledBy": {
-                            "@id": "trs",
-                            "@type": [
-                                "trov:TrustedResearchSystem",
-                                "schema:Organization",
-                            ],
-                            **self.profile,
-                        },
-                        "trov:vocabularyVersion": str(TROV_VOCABULARY_VERSION),
-                    },
-                ],
-            }
-        else:
-            self.data = json.load(open(self.tro_filename))
-        tro_version = Version(self.data["@graph"][0].get("trov:vocabularyVersion", "0.0.1"))
-        if tro_version < TROV_VOCABULARY_VERSION:
-            msg = (
-                "Your TRO was created with an older version of the TRO vocabulary. "
-                "In order to properly parse it you need to use tro-utils < 0.3.0. "
+            trs = TrustedResearchSystem.from_profile(self.profile)
+            self._model = TransparentResearchObject(
+                creator=tro_creator or "TRO utils",
+                name=tro_name or "Some TRO",
+                description=tro_description or "Some description",
+                trs=trs,
+                created_with_name="tro-utils",
+                created_with_version=__version__,
             )
-            raise RuntimeError(msg)
+        else:
+            self._model = TransparentResearchObject.load(self.tro_filename)
+
         self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
         if gpg_fingerprint:
             self.gpg_key_id = self.gpg.list_keys().key_map[gpg_fingerprint]["keyid"]
-            self.data["@graph"][0]["trov:wasAssembledBy"]["trov:publicKey"] = (
-                self.gpg.export_keys(self.gpg_key_id)
-            )
+            self._model.trs.public_key = self.gpg.export_keys(self.gpg_key_id)
         if gpg_passphrase:
             self.gpg_passphrase = gpg_passphrase
+
+    # ------------------------------------------------------------------
+    # File path helpers
+    # ------------------------------------------------------------------
 
     @property
     def base_filename(self):
@@ -140,213 +109,74 @@ class TRO:
     def tsr_filename(self):
         return f"{self.base_filename}.tsr"
 
+    # ------------------------------------------------------------------
+    # data property — computed from the underlying model
+    # ------------------------------------------------------------------
+
+    @property
+    def data(self) -> dict:
+        """Return the current JSON-LD representation of the TRO.
+
+        Computed on every access from the underlying
+        :class:`~tro_utils.models.TransparentResearchObject`.
+        """
+        return self._model.to_jsonld()
+
+    # ------------------------------------------------------------------
+    # Delegation helpers
+    # ------------------------------------------------------------------
+
     def get_composition_seq(self):
-        return len(self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"])
+        return len(self._model.composition.artifacts)
 
     def get_arrangement_seq(self):
-        return len(self.data["@graph"][0]["trov:hasArrangement"])
-
-    @staticmethod
-    def _get_hash(artifact):
-        if isinstance(artifact, dict):
-            if "trov:sha256" in artifact:
-                return f"sha256:{artifact['trov:sha256']}"
-            elif "trov:hash" in artifact:
-                _hash = artifact["trov:hash"]
-                if isinstance(_hash, dict):
-                    return f"{_hash['trov:hashAlgorithm']}:{_hash['trov:hashValue']}"
-                elif isinstance(_hash, list):
-                    # try to find a sha256 hash, otherwise return the first hash in the list
-                    for h in _hash:
-                        if h.get("trov:hashAlgorithm") == "sha256":
-                            return f"sha256:{h['trov:hashValue']}"
-                    return (
-                        f"{_hash[0]['trov:hashAlgorithm']}:{_hash[0]['trov:hashValue']}"
-                    )
-        raise ValueError(f"Artifact {artifact} does not contain a recognizable hash")
-
-    def get_hash_mapping(self):
-        return {
-            self._get_hash(_): {"@id": _["@id"], "trov:mimeType": _["trov:mimeType"]}
-            for _ in self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
-        }
-
-    @staticmethod
-    def calculate_fingerprint(artifacts):
-        hashes = []
-        for art in artifacts:
-            if "trov:sha256" in art:
-                hashes.append(art["trov:sha256"])
-            elif "trov:hash" in art and isinstance(art["trov:hash"], dict):
-                hashes.append(art["trov:hash"]["trov:hashValue"])
-            elif "trov:hash" in art and isinstance(art["trov:hash"], list):
-                hashes += [_["trov:hashValue"] for _ in art["trov:hash"]]
-        return hashlib.sha256("".join(sorted(hashes)).encode("utf-8")).hexdigest()
-
-    def update_composition(self, composition):
-        self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"] = [
-            {
-                "@id": value["@id"],
-                "trov:hash": {
-                    "trov:hashAlgorithm": key.split(":")[0],
-                    "trov:hashValue": key.split(":")[1],
-                },
-                "trov:mimeType": value["trov:mimeType"],
-                "@type": "trov:ResearchArtifact",
-            }
-            for key, value in composition.items()
-        ]
-        self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"].sort(
-            key=lambda x: x["@id"],
-        )
-        fingerprint = self.calculate_fingerprint(
-            self.data["@graph"][0]["trov:hasComposition"]["trov:hasArtifact"]
-        )
-        self.data["@graph"][0]["trov:hasComposition"]["trov:hasFingerprint"] = {
-            "@id": "fingerprint",
-            "@type": "trov:CompositionFingerprint",
-            "trov:hash": {
-                "trov:hashAlgorithm": "sha256",
-                "trov:hashValue": fingerprint,
-            },
-        }
+        return len(self._model.arrangements)
 
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
     def get_arrangement_path_hash_map(self, arrangement_id):
-        """
-        Get a mapping of paths to hashes for a specific arrangement.
-
-        Args:
-            arrangement_id: The ID of the arrangement (e.g., "arrangement/0")
-
-        Returns:
-            dict: A dictionary mapping file paths to their SHA256 hashes
-
-        Raises:
-            ValueError: If the arrangement ID does not exist
-        """
-        # Find the arrangement
-        arrangement = None
-        for arr in self.data["@graph"][0]["trov:hasArrangement"]:
-            if arr["@id"] == arrangement_id:
-                arrangement = arr
-                break
-
+        arrangement = next(
+            (a for a in self._model.arrangements if a.arrangement_id == arrangement_id),
+            None,
+        )
         if arrangement is None:
-            available = [
-                arr["@id"] for arr in self.data["@graph"][0]["trov:hasArrangement"]
-            ]
+            available = [a.arrangement_id for a in self._model.arrangements]
             raise ValueError(
                 f"Arrangement '{arrangement_id}' not found. "
                 f"Available arrangements: {available}"
             )
-
-        # Build a composition lookup map (artifact id -> hash)
-        composition_map = {
-            artifact["@id"]: self._get_hash(artifact)
-            for artifact in self.data["@graph"][0]["trov:hasComposition"][
-                "trov:hasArtifact"
-            ]
-        }
-
-        # Build the path -> hash mapping
-        path_hash_map = {}
-        for location in arrangement.get("trov:hasArtifactLocation", []):
-            path = location["trov:path"]
-            artifact_id = location["trov:artifact"]["@id"]
-            hash_value = composition_map.get(artifact_id)
-            if hash_value:
-                path_hash_map[path] = hash_value
-
-        return path_hash_map
+        return arrangement.to_path_hash_map(self._model.composition)
 
     def add_arrangement(
         self, directory, ignore_dirs=None, comment=None, resolve_symlinks=True
     ):
-        if ignore_dirs is None:
-            ignore_dirs = [".git"]
-
-        if comment is None:
-            comment = f"Scanned {directory}"
-
-        hashes = self.sha256_for_directory(
-            directory, ignore_dirs=ignore_dirs, resolve_symlinks=resolve_symlinks
+        self._model.add_arrangement(
+            directory=directory,
+            comment=comment,
+            ignore_dirs=ignore_dirs,
+            resolve_symlinks=resolve_symlinks,
         )
-        composition = self.get_hash_mapping()
-        i = self.get_composition_seq()
 
-        magic_wrapper = magic.Magic(mime=True, uncompress=True)
-
-        for filepath, hash_value in hashes.items():
-            if hash_value in composition:
-                continue
-            if pathlib.Path(filepath).is_symlink():
-                mime_type = "inode/symlink"
-            else:
-                mime_type = (
-                    magic_wrapper.from_file(filepath) or "application/octet-stream"
-                )
-            composition[hash_value] = {
-                "@id": f"composition/1/artifact/{i}",
-                "trov:mimeType": mime_type,
-            }
-            i += 1
-
-        self.update_composition(composition)
-
-        arrangement_id = f"arrangement/{self.get_arrangement_seq()}"
-        arrangement = {
-            "@id": arrangement_id,
-            "@type": "trov:ArtifactArrangement",
-            "rdfs:comment": comment,
-            "trov:hasArtifactLocation": [],
-        }
-        i = 0
-        directory = pathlib.Path(directory)
-        for filepath, hash_value in hashes.items():
-            arrangement["trov:hasArtifactLocation"].append(
-                {
-                    "@id": f"{arrangement_id}/location/{i}",
-                    "@type": "trov:ArtifactLocation",
-                    "trov:artifact": {"@id": composition[hash_value]["@id"]},
-                    "trov:path": pathlib.Path(filepath)
-                    .relative_to(directory)
-                    .as_posix(),
-                }
-            )
-            i += 1
-        self.data["@graph"][0]["trov:hasArrangement"].append(arrangement)
+    def add_arrangement_from_snapshot(self, filepath, comment=None):
+        self._model.add_arrangement_from_snapshot(filepath=filepath, comment=comment)
 
     def save(self):
-        with open(self.tro_filename, "w") as f:
-            json.dump(self.data, f, indent=2, sort_keys=True)
+        self._model.save(self.tro_filename)
+
+    # ------------------------------------------------------------------
+    # Hashing utilities
+    # ------------------------------------------------------------------
 
     @staticmethod
     def sha256_for_file(filepath, resolve_symlinks=True):
-        sha256 = hashlib.sha256()
-        filepath_obj = pathlib.Path(filepath)
-        if not filepath_obj.is_file() or filepath_obj.is_symlink():
-            return "none:"
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        return f"sha256:{sha256.hexdigest()}"
+        from .models.arrangement import ArtifactArrangement
 
-    def sha256_for_directory(self, directory, ignore_dirs=None, resolve_symlinks=True):
-        if ignore_dirs is None:
-            ignore_dirs = [".git"]  # Default ignore list
-        hashes = {}
-        for root, dirs, files in os.walk(directory):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs]
-            for filename in files:
-                filepath = str(pathlib.Path(root) / filename)
-                hash_value = self.sha256_for_file(
-                    filepath, resolve_symlinks=resolve_symlinks
-                )
-                hashes[filepath] = hash_value
-        return hashes
+        return ArtifactArrangement._sha256_for_file(filepath, resolve_symlinks)
+
+    # ------------------------------------------------------------------
+    # Signing and timestamping
+    # ------------------------------------------------------------------
 
     def trs_signature(self):
         if self.gpg_key_id is None:
@@ -408,7 +238,6 @@ class TRO:
             data_f.flush()
             data_f.seek(0)
 
-            # Download the TSA certificate
             response = requests.get(
                 "https://freetsa.org/files/tsa.crt", allow_redirects=True
             )
@@ -416,7 +245,6 @@ class TRO:
             tsacert_f.flush()
             tsacert_f.seek(0)
 
-            # Download the CA certificate
             response = requests.get(
                 "https://freetsa.org/files/cacert.pem", allow_redirects=True
             )
@@ -439,202 +267,99 @@ class TRO:
             ]
             subprocess.check_call(args)
 
+    # ------------------------------------------------------------------
+    # Replication package verification
+    # ------------------------------------------------------------------
+
     def verify_replication_package(self, arrangement_id, package, subpath=None):
-        files_missing_in_arrangement = []
-        mismatched_hashes = []
+        from .replication_package import ReplicationPackage
 
-        arrangement_map = self.get_arrangement_path_hash_map(arrangement_id)
-
-        # Generator to yield (relative_filename, file_hash) tuples
-        def iterate_package_files():
-            if pathlib.Path(package).is_dir():
-                package_path = pathlib.Path(package)
-                for root, dirs, files in os.walk(package):
-                    for filename in files:
-                        filepath = pathlib.Path(root) / filename
-                        # Use pathlib for robust cross-platform path handling
-                        relative_filename = filepath.relative_to(
-                            package_path
-                        ).as_posix()
-                        yield relative_filename, self.sha256_for_file(str(filepath))
-            else:
-                with zipfile.ZipFile(package, "r") as zf:
-                    for fileinfo in zf.infolist():
-                        sha256 = hashlib.sha256()
-                        with zf.open(fileinfo.filename) as f:
-                            for chunk in iter(lambda: f.read(4096), b""):
-                                sha256.update(chunk)
-                        file_hash = f"sha256:{sha256.hexdigest()}"
-                        yield fileinfo.filename, file_hash
-
-        for original_filename, file_hash in iterate_package_files():
-            relative_filename = original_filename
-
-            # Handle subpath filtering
-            if subpath is not None:
-                # Use pathlib for robust cross-platform subpath handling
-                original_path = pathlib.PurePosixPath(original_filename)
-                subpath_posix = pathlib.PurePosixPath(subpath)
-
-                try:
-                    # Check if path is relative to subpath
-                    relative_filename = original_path.relative_to(
-                        subpath_posix
-                    ).as_posix()
-                except ValueError:
-                    # Path is not under subpath, skip it
-                    continue
-
-            # Check if file exists in arrangement
-            if relative_filename not in arrangement_map:
-                files_missing_in_arrangement.append(relative_filename)
-
-            # Verify hash
-            expected_hash = arrangement_map.pop(relative_filename, None)
-            if file_hash != expected_hash:
-                mismatched_hashes.append((relative_filename, expected_hash, file_hash))
-
-        dirty = (
-            files_missing_in_arrangement
-            or mismatched_hashes
-            or len(arrangement_map) > 0
+        arrangement = next(
+            (a for a in self._model.arrangements if a.arrangement_id == arrangement_id),
+            None,
+        )
+        if arrangement is None:
+            available = [a.arrangement_id for a in self._model.arrangements]
+            raise ValueError(
+                f"Arrangement '{arrangement_id}' not found. "
+                f"Available arrangements: {available}"
+            )
+        result = ReplicationPackage.verify(
+            arrangement, self._model.composition, package, subpath
         )
         return (
-            files_missing_in_arrangement,
-            mismatched_hashes,
-            list(arrangement_map.keys()),
-            not dirty,
+            result.files_missing_in_arrangement,
+            result.mismatched_hashes,
+            result.files_missing_in_package,
+            result.is_valid,
         )
+
+    # ------------------------------------------------------------------
+    # Performance recording
+    # ------------------------------------------------------------------
 
     def add_performance(
         self,
         start_time,
         end_time,
         comment=None,
-        accessed_arrangement=None,
-        modified_arrangement=None,
+        accessed_arrangement=None,  # str | ArrangementRef | list[str | ArrangementRef] | None
+        modified_arrangement=None,  # str | ArrangementRef | list[str | ArrangementRef] | None
         attrs=None,
         extra_attributes=None,
     ):
-        if attrs is None:
-            attrs = []
-        if extra_attributes is None:
-            extra_attributes = {}
+        self._model.add_performance(
+            start_time=start_time,
+            end_time=end_time,
+            comment=comment,
+            accessed_arrangement=accessed_arrangement,
+            modified_arrangement=modified_arrangement,
+            attrs=attrs,
+            extra_attributes=extra_attributes,
+        )
 
-        trp = {
-            "@id": f"trp/{len(self.data['@graph'][0]['trov:hasPerformance'])}",
-            "@type": "trov:TrustedResearchPerformance",
-            "rdfs:comment": comment or "Some performance",
-            "trov:wasConductedBy": {"@id": "trs"},
-            "trov:hasPerformanceAttribute": [],
-            "trov:startedAtTime": start_time.isoformat(),
-            "trov:endedAtTime": end_time.isoformat(),
-        }
-        trp.update(extra_attributes)
-
-        available_arrangements = [
-            _["@id"] for _ in self.data["@graph"][0]["trov:hasArrangement"]
-        ]
-
-        if accessed_arrangement:
-            # check if the arrangement exists
-            if accessed_arrangement not in available_arrangements:
-                raise ValueError(
-                    f"Arrangement {accessed_arrangement} does not exist. "
-                    f"Available arrangements: {available_arrangements}"
-                )
-            trp["trov:accessedArrangement"] = {"@id": accessed_arrangement}
-
-        if modified_arrangement:
-            # check if the arrangement exists
-            if modified_arrangement not in available_arrangements:
-                raise ValueError(
-                    f"Arrangement {modified_arrangement} does not exist. "
-                    f"Available arrangements: {available_arrangements}"
-                )
-            trp["trov:contributedToArrangement"] = {"@id": modified_arrangement}
-
-        trs_caps = {
-            _["@type"]: _["@id"]
-            for _ in self.data["@graph"][0]["trov:wasAssembledBy"]["trov:hasCapability"]
-        }
-
-        i = 0
-        for attr in attrs:
-            if isinstance(attr, str):
-                attr = TRPAttribute(attr)
-            assert attr.value in TRPAttribute
-            cap = TROVCapability.translate(attr)
-            if cap.value not in trs_caps.keys():
-                raise ValueError(
-                    f"Capability {cap.value} is required for attribute {attr.value} but is not present in TRS capabilities"
-                    "List of TRS capabilities: "
-                    f"{list(trs_caps.keys())}"
-                )
-            trp["trov:hasPerformanceAttribute"].append(
-                {
-                    "@id": f"{trp['@id']}/attribute/{i}",
-                    "@type": attr.value,
-                    "trov:warrantedBy": {"@id": trs_caps[cap.value]},
-                }
-            )
-            i += 1
-
-        self.data["@graph"][0]["trov:hasPerformance"].append(trp)
+    # ------------------------------------------------------------------
+    # Report generation
+    # ------------------------------------------------------------------
 
     def generate_report(self, template, report):
         graph = self.data["@graph"][0]
-        composition = {
-            obj["@id"]: obj for obj in graph["trov:hasComposition"]["trov:hasArtifact"]
-        }
+        artifact_lookup = {a.artifact_id: a for a in self._model.composition.artifacts}
         arrangements = {}
-        for arr in self.data["@graph"][0]["trov:hasArrangement"]:
+        for arr in self._model.arrangements:
             artifacts = {
-                obj["trov:path"]: {
-                    "hash": self._get_hash(composition[obj["trov:artifact"]["@id"]]),
-                    "creator": obj.get("schema:creator", "trs"),
-                    "createdDate": obj.get("schema:createdDate", "None"),
+                loc.path: {
+                    "hash": artifact_lookup[loc.artifact_id].hash.to_string(),
+                    "creator": "trs",
+                    "createdDate": "None",
                 }
-                for obj in sorted(
-                    arr["trov:hasArtifactLocation"], key=lambda x: x["trov:path"]
-                )
+                for loc in sorted(arr.locations, key=lambda _: _.path)
             }
-
-            arrangements[arr["@id"]] = {
-                "name": arr["rdfs:comment"],
+            arrangements[arr.arrangement_id] = {
+                "name": arr.comment,
                 "artifacts": artifacts,
             }
 
-        # Graphviz!
         dot = graphviz.Digraph("TRO")
         dot.graph_attr["rankdir"] = "LR"
         dot.attr("edge", color="black")
         dot.graph_attr["dpi"] = "200"
 
         dot.attr("node", shape="box", style="filled, rounded", fillcolor="#FFFFD1")
-        for arrangement in arrangements:
-            dot.node(arrangements[arrangement]["name"])
+        for arr_id in arrangements:
+            dot.node(arrangements[arr_id]["name"])
 
         dot.attr("node", shape="box3d", style="filled, rounded", fillcolor="#D6FDD0")
-
-        if isinstance(graph["trov:hasPerformance"], dict):
-            graph["trov:hasPerformance"] = [graph["trov:hasPerformance"]]
-        for trp in graph["trov:hasPerformance"]:
-            description = trp["rdfs:comment"]
-            accessed = arrangements[trp["trov:accessedArrangement"]["@id"]]["name"]
-            contributed = arrangements[trp["trov:contributedToArrangement"]["@id"]][
-                "name"
-            ]
-            dot.node(description)
-            dot.edge(accessed, description)
-            dot.edge(description, contributed)
+        for perf in self._model.performances:
+            dot.node(perf.comment)
+            for ref in perf.accessed_arrangements:
+                dot.edge(arrangements[ref.arrangement_id]["name"], perf.comment)
+            for ref in perf.contributed_to_arrangements:
+                dot.edge(perf.comment, arrangements[ref.arrangement_id]["name"])
 
         png_bytes = dot.pipe(format="png")
         png_base64 = base64.b64encode(png_bytes).decode("utf-8")
 
-        # Detect changes between arrangements
-        # Which files were added? Which files changed?
-        # Which files were removed?
         keys = list(arrangements.keys())
 
         for n in reversed(range(1, len(keys))):
@@ -659,18 +384,20 @@ class TRO:
             "workflow_diagram": png_base64,
             "trps": [
                 {
-                    "id": trp["@id"],
-                    "started": trp["trov:startedAtTime"],
-                    "ended": trp["trov:endedAtTime"],
-                    "accessed": arrangements[
-                        trp.get("trov:accessedArrangement", {"@id": ""})["@id"]
-                    ]["name"],
-                    "contributed": arrangements[
-                        trp.get("trov:contributedToArrangement", {"@id": ""})["@id"]
-                    ]["name"],
-                    "description": trp.get("rdfs:comment", ""),
+                    "id": perf.performance_id,
+                    "started": perf.started_at.isoformat() if perf.started_at else None,
+                    "ended": perf.ended_at.isoformat() if perf.ended_at else None,
+                    "accessed": [
+                        arrangements[ref.arrangement_id]["name"]
+                        for ref in perf.accessed_arrangements
+                    ],
+                    "contributed": [
+                        arrangements[ref.arrangement_id]["name"]
+                        for ref in perf.contributed_to_arrangements
+                    ],
+                    "description": perf.comment,
                 }
-                for trp in graph["trov:hasPerformance"]
+                for perf in self._model.performances
             ],
             "arrangements": arrangements,
         }

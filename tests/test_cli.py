@@ -3,6 +3,7 @@
 Note: These tests focus on CLI command structure and basic functionality.
 GPG-based signing/verification tests are excluded due to GPG key_map complexity.
 """
+
 import json
 from unittest.mock import MagicMock
 
@@ -137,7 +138,9 @@ class TestArrangementCommands:
             data = json.load(f)
             locations = [
                 loc["trov:path"]
-                for loc in data["@graph"][0]["trov:hasArrangement"][0]["trov:hasArtifactLocation"]
+                for loc in data["@graph"][0]["trov:hasArrangement"][0][
+                    "trov:hasArtifactLocation"
+                ]
             ]
             assert not any(".git" in loc for loc in locations)
 
@@ -477,3 +480,178 @@ class TestErrorHandling:
             ],
         )
         assert result.exit_code != 0
+
+
+class TestCLIPerformance:
+    """Test performance-related CLI commands including ID:PATH syntax."""
+
+    def _setup_tro_with_arrangements(
+        self, runner, tro_file, trs_profile, temp_workspace, extra_files=None
+    ):
+        """Helper: build a TRO file with two arrangements via CLI."""
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "arrangement",
+                "add",
+                "--comment",
+                "A",
+                str(temp_workspace),
+            ],
+        )
+        if extra_files:
+            for name, content in extra_files.items():
+                (temp_workspace / name).write_text(content)
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "arrangement",
+                "add",
+                "--comment",
+                "B",
+                str(temp_workspace),
+            ],
+        )
+
+    def test_performance_add_plain_ids(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """Plain arrangement IDs are accepted by the performance add command."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(
+            runner,
+            tro_file,
+            trs_profile,
+            temp_workspace,
+            extra_files={"out.txt": "x"},
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "performance",
+                "add",
+                "--comment",
+                "plain",
+                "--start",
+                "2024-01-01T10:00:00",
+                "--end",
+                "2024-01-01T11:00:00",
+                "-A",
+                "arrangement/0",
+                "-M",
+                "arrangement/1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            data = json.load(f)
+        perf = data["@graph"][0]["trov:hasPerformance"][0]
+        assert perf["trov:accessedArrangement"]["@id"] == "arrangement/0"
+        assert perf["trov:contributedToArrangement"]["@id"] == "arrangement/1"
+
+    def test_performance_add_id_with_path(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """ARRANGEMENT_ID:PATH syntax is parsed and serialised as trov:path."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(
+            runner,
+            tro_file,
+            trs_profile,
+            temp_workspace,
+            extra_files={"out.txt": "x"},
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "performance",
+                "add",
+                "--start",
+                "2024-01-01T10:00:00",
+                "--end",
+                "2024-01-01T11:00:00",
+                "-A",
+                "arrangement/0:/mnt/input",
+                "-M",
+                "arrangement/1:/mnt/output",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            data = json.load(f)
+        perf = data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert accessed["@id"] == "arrangement/0"
+        assert accessed["trov:path"] == "/mnt/input"
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["@id"] == "arrangement/1"
+        assert contributed["trov:path"] == "/mnt/output"
+
+    def test_performance_add_multiple_accessed_with_paths(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """Multiple -A flags mixing plain IDs and ID:PATH both persist correctly."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(
+            runner,
+            tro_file,
+            trs_profile,
+            temp_workspace,
+            extra_files={"out.txt": "x"},
+        )
+        (temp_workspace / "out2.txt").write_text("y")
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "arrangement",
+                "add",
+                "--comment",
+                "C",
+                str(temp_workspace),
+            ],
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "performance",
+                "add",
+                "--start",
+                "2024-01-01T10:00:00",
+                "--end",
+                "2024-01-01T11:00:00",
+                "-A",
+                "arrangement/0:/mnt/a",
+                "-A",
+                "arrangement/1",
+                "-M",
+                "arrangement/2",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            data = json.load(f)
+        perf = data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert isinstance(accessed, list)
+        assert len(accessed) == 2
+        by_id = {r["@id"]: r for r in accessed}
+        assert by_id["arrangement/0"]["trov:path"] == "/mnt/a"
+        assert "trov:path" not in by_id["arrangement/1"]

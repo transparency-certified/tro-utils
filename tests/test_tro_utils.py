@@ -4,8 +4,6 @@ import datetime
 import importlib
 import json
 import os
-import sys
-from hashlib import sha256
 from importlib.metadata import PackageNotFoundError
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +12,22 @@ import pytest
 
 from tro_utils import TRPAttribute
 from tro_utils.tro_utils import TRO
+from tro_utils.models import (
+    ArtifactArrangement,
+    ArtifactComposition,
+    ArtifactLocation,
+    ArrangementRef,
+    CompositionFingerprint,
+    HashValue,
+    PerformanceAttribute,
+    ResearchArtifact,
+    TimeStampingAuthority,
+    TransparentResearchObject,
+    TROAttribute,
+    TRSCapability,
+    TrustedResearchPerformance,
+    TrustedResearchSystem,
+)
 
 
 # Helper function to create TRO with proper GPG setup
@@ -225,6 +239,86 @@ class TestTROCreation:
 class TestTROArrangements:
     """Test TRO arrangement operations."""
 
+    def test_add_arrangement_from_snapshot(self, tmp_path, gpg_setup):
+        """add_arrangement_from_snapshot loads a pre-computed snapshot into the TRO."""
+        # Create a snapshot independently
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "data.csv").write_text("a,b\n1,2")
+        (workdir / "readme.txt").write_text("desc")
+
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="static mount"
+        )
+        snap_path = tmp_path / "mount.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        # Load into a TRO
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement_from_snapshot(str(snap_path))
+        tro.save()
+
+        arrangements = tro.list_arrangements()
+        assert len(arrangements) == 1
+        assert arrangements[0]["rdfs:comment"] == "static mount"
+        paths = [
+            loc["trov:path"] for loc in arrangements[0]["trov:hasArtifactLocation"]
+        ]
+        assert "data.csv" in paths
+        assert "readme.txt" in paths
+
+    def test_add_arrangement_from_snapshot_comment_override(self, tmp_path, gpg_setup):
+        """comment kwarg overrides the comment stored in the snapshot file."""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "f.txt").write_text("x")
+
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="original comment"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement_from_snapshot(str(snap_path), comment="overridden")
+
+        arrangements = tro.list_arrangements()
+        assert arrangements[0]["rdfs:comment"] == "overridden"
+
+    def test_add_arrangement_from_snapshot_deduplicates_artifacts(
+        self, tmp_path, gpg_setup
+    ):
+        """Files already in the TRO composition are not duplicated when a snapshot is loaded."""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "common.txt").write_text("shared content")
+
+        # First add the directory normally so the artifact is in the TRO composition
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement(str(workdir), comment="live")
+        artifact_count_after_first = len(tro._model.composition.artifacts)
+
+        # Create a snapshot with the same file
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="snap"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        tro.add_arrangement_from_snapshot(str(snap_path))
+
+        # Composition artifact count must not have grown
+        assert len(tro._model.composition.artifacts) == artifact_count_after_first
+
     def test_add_arrangement(self, temp_workspace, tmp_path, gpg_setup, trs_profile):
         """Test adding an arrangement to a TRO."""
         tro = create_tro_with_gpg(
@@ -393,6 +487,133 @@ class TestTROPerformances:
                 modified_arrangement="arrangement/0",
                 attrs=[],
             )
+
+    def test_add_performance_multiple_arrangements(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """add_performance accepts a list of arrangement IDs for accessed/modified."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+        (temp_workspace / "out2.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="C")
+
+        start_time = datetime.datetime(2024, 1, 1, 10, 0, 0)
+        end_time = datetime.datetime(2024, 1, 1, 11, 0, 0)
+
+        tro.add_performance(
+            start_time=start_time,
+            end_time=end_time,
+            comment="multi",
+            accessed_arrangement=["arrangement/0", "arrangement/1"],
+            modified_arrangement=["arrangement/2"],
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        # Two accessed → serialised as a list
+        accessed = perf["trov:accessedArrangement"]
+        assert isinstance(accessed, list)
+        assert len(accessed) == 2
+        assert {r["@id"] for r in accessed} == {"arrangement/0", "arrangement/1"}
+        # One contributed → serialised as a plain dict
+        contributed = perf["trov:contributedToArrangement"]
+        assert isinstance(contributed, dict)
+        assert contributed["@id"] == "arrangement/2"
+
+    def test_add_performance_multiple_arrangements_invalid(
+        self, tmp_path, gpg_setup, trs_profile
+    ):
+        """Providing any invalid ID in a list raises ValueError."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        start_time = datetime.datetime(2024, 1, 1, 10, 0, 0)
+        end_time = datetime.datetime(2024, 1, 1, 11, 0, 0)
+        with pytest.raises(ValueError, match="does not exist"):
+            tro.add_performance(
+                start_time=start_time,
+                end_time=end_time,
+                accessed_arrangement=["arrangement/0", "arrangement/999"],
+                modified_arrangement=None,
+                attrs=[],
+            )
+
+    def test_add_performance_arrangement_ref_with_path(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """ArrangementRef objects with path are accepted and serialise trov:path."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="with path",
+            accessed_arrangement=ArrangementRef("arrangement/0", path="/mnt/data"),
+            modified_arrangement="arrangement/1",
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert accessed["@id"] == "arrangement/0"
+        assert accessed["trov:path"] == "/mnt/data"
+        # contributed has no path
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["@id"] == "arrangement/1"
+        assert "trov:path" not in contributed
+
+    def test_add_performance_mixed_strings_and_refs(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """A mixed list of str and ArrangementRef is accepted; paths serialised where set."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+        (temp_workspace / "out2.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="C")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="mixed",
+            accessed_arrangement=[
+                ArrangementRef("arrangement/0", path="/mnt/input"),
+                "arrangement/1",
+            ],
+            modified_arrangement=ArrangementRef("arrangement/2", path="/mnt/output"),
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert isinstance(accessed, list)
+        assert len(accessed) == 2
+        by_id = {r["@id"]: r for r in accessed}
+        assert by_id["arrangement/0"]["trov:path"] == "/mnt/input"
+        assert "trov:path" not in by_id["arrangement/1"]
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["@id"] == "arrangement/2"
+        assert contributed["trov:path"] == "/mnt/output"
 
 
 class TestTROSigning:
@@ -620,24 +841,6 @@ class TestTROHashingAndComposition:
             "sha256:dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
         )
         assert hash_value == expected_hash
-
-    def test_sha256_for_directory(self, temp_workspace, tmp_path, gpg_setup):
-        """Test computing SHA256 hashes for all files in a directory."""
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        hashes = tro.sha256_for_directory(str(temp_workspace), ignore_dirs=[])
-
-        # Verify we got hashes for all files
-        assert len(hashes) == 3  # 3 files in workspace
-
-        # Verify all hashes are non-empty
-        for filepath, hash_value in hashes.items():
-            assert hash_value.startswith("sha256:")
-            assert (
-                len(hash_value[len("sha256:") :]) == 64
-            )  # SHA256 produces 64 hex characters
 
     def test_composition_fingerprint(self, temp_workspace, tmp_path, gpg_setup):
         """Test that composition fingerprint is computed correctly."""
@@ -923,78 +1126,6 @@ class TestTROUtilityMethods:
         assert "@type" in composition_info
         assert "trov:hasArtifact" in composition_info
         assert len(composition_info["trov:hasArtifact"]) > 0
-
-    def test_hash_handling(self, tmp_path, gpg_setup):
-        """Test that hash handling works correctly."""
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        example_hash = (
-            "6591aa920533077fbfa0ffb62d4a2e246b692e0754ca86b86d86824f313325a2"
-        )
-        # Test that providing a hash directly works
-        artifacts = {
-            "trov:sha256": example_hash,
-        }
-        assert tro._get_hash(artifacts)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_dict = {
-            "trov:hash": {
-                "trov:hashAlgorithm": "sha256",
-                "trov:hashValue": example_hash,
-            },
-        }
-        assert tro._get_hash(artifact_with_hash_dict)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_list = {
-            "trov:hash": [
-                {
-                    "trov:hashAlgorithm": "sha512",
-                    "trov:hashValue": "foo",
-                },
-                {
-                    "trov:hashAlgorithm": "sha256",
-                    "trov:hashValue": example_hash,
-                },
-            ]
-        }
-        assert tro._get_hash(artifact_with_hash_list)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_list = {
-            "trov:hash": [
-                {
-                    "trov:hashAlgorithm": "sha512",
-                    "trov:hashValue": "foo",
-                },
-                {
-                    "trov:hashAlgorithm": "md5",
-                    "trov:hashValue": "md5hash",
-                },
-            ]
-        }
-        assert tro._get_hash(artifact_with_hash_list) == "sha512:foo"
-
-        with pytest.raises(ValueError, match="does not contain"):
-            tro._get_hash({})
-
-    def test_fingerprint(self, tmp_path, gpg_setup):
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        artifacts = [
-            {"trov:sha256": "abc123"},
-            {"trov:hash": {"trov:hashAlgorithm": "sha256", "trov:hashValue": "def456"}},
-            {
-                "trov:hash": [
-                    {"trov:hashAlgorithm": "sha256", "trov:hashValue": "abc123"},
-                    {"trov:hashAlgorithm": "sha512", "trov:hashValue": "def456"},
-                ]
-            },
-        ]
-        fingerprint = tro.calculate_fingerprint(artifacts)
-        assert fingerprint == sha256("abc123abc123def456def456".encode()).hexdigest()
 
 
 class TestReplicationPackageVerification:
@@ -1396,3 +1527,790 @@ class TestReplicationPackageVerification:
         # Try to get mapping for non-existent arrangement
         with pytest.raises(ValueError, match="not found"):
             tro.get_arrangement_path_hash_map("arrangement/99")
+
+
+# =============================================================================
+# Tests for the new OOP model classes (tro_utils.models)
+# =============================================================================
+
+
+class TestHashValue:
+    """Unit tests for HashValue value object."""
+
+    def test_from_string_roundtrip(self):
+        h = HashValue.from_string("sha256:abc123")
+        assert h.algorithm == "sha256"
+        assert h.value == "abc123"
+        assert h.to_string() == "sha256:abc123"
+        assert str(h) == "sha256:abc123"
+
+    def test_from_string_invalid_raises(self):
+        with pytest.raises(ValueError, match="Expected"):
+            HashValue.from_string("invalidsyntax")
+
+    def test_to_jsonld(self):
+        h = HashValue(algorithm="sha256", value="deadbeef")
+        jld = h.to_jsonld()
+        assert jld == {"trov:hashAlgorithm": "sha256", "trov:hashValue": "deadbeef"}
+
+    def test_from_jsonld_dict(self):
+        h = HashValue.from_jsonld(
+            {"trov:hashAlgorithm": "sha256", "trov:hashValue": "deadbeef"}
+        )
+        assert h.algorithm == "sha256"
+        assert h.value == "deadbeef"
+
+    def test_from_jsonld_list_prefers_sha256(self):
+        data = [
+            {"trov:hashAlgorithm": "md5", "trov:hashValue": "aaa"},
+            {"trov:hashAlgorithm": "sha256", "trov:hashValue": "bbb"},
+        ]
+        h = HashValue.from_jsonld(data)
+        assert h.algorithm == "sha256"
+        assert h.value == "bbb"
+
+    def test_from_jsonld_list_falls_back_to_first(self):
+        data = [{"trov:hashAlgorithm": "md5", "trov:hashValue": "aaa"}]
+        h = HashValue.from_jsonld(data)
+        assert h.algorithm == "md5"
+
+    def test_from_jsonld_legacy_sha256(self):
+        h = HashValue.from_jsonld({"trov:sha256": "cafebabe"})
+        assert h.algorithm == "sha256"
+        assert h.value == "cafebabe"
+
+    def test_from_jsonld_string(self):
+        h = HashValue.from_jsonld("sha512:1234")
+        assert h.algorithm == "sha512"
+        assert h.value == "1234"
+
+    def test_from_jsonld_invalid_raises(self):
+        with pytest.raises(ValueError):
+            HashValue.from_jsonld({"no": "hash_fields"})
+
+    def test_equality(self):
+        assert HashValue("sha256", "abc") == HashValue("sha256", "abc")
+        assert HashValue("sha256", "abc") != HashValue("sha256", "xyz")
+
+
+class TestResearchArtifact:
+    """Unit tests for ResearchArtifact model."""
+
+    def _make_artifact(self):
+        return ResearchArtifact(
+            artifact_id="composition/1/artifact/0",
+            hash=HashValue("sha256", "deadbeef"),
+            mime_type="text/csv",
+        )
+
+    def test_to_jsonld(self):
+        a = self._make_artifact()
+        jld = a.to_jsonld()
+        assert jld["@id"] == "composition/1/artifact/0"
+        assert jld["@type"] == "trov:ResearchArtifact"
+        assert jld["trov:hash"]["trov:hashAlgorithm"] == "sha256"
+        assert jld["trov:mimeType"] == "text/csv"
+
+    def test_from_jsonld_roundtrip(self):
+        a = self._make_artifact()
+        restored = ResearchArtifact.from_jsonld(a.to_jsonld())
+        assert restored.artifact_id == a.artifact_id
+        assert restored.hash == a.hash
+        assert restored.mime_type == a.mime_type
+
+    def test_from_jsonld_legacy_sha256(self):
+        data = {
+            "@id": "composition/1/artifact/0",
+            "@type": "trov:ResearchArtifact",
+            "trov:sha256": "aabbcc",
+            "trov:mimeType": "text/plain",
+        }
+        a = ResearchArtifact.from_jsonld(data)
+        assert a.hash.algorithm == "sha256"
+        assert a.hash.value == "aabbcc"
+
+    def test_from_jsonld_missing_hash_raises(self):
+        with pytest.raises(ValueError):
+            ResearchArtifact.from_jsonld({"@id": "x", "@type": "trov:ResearchArtifact"})
+
+    def test_from_file(self, tmp_path):
+        f = tmp_path / "sample.txt"
+        f.write_text("hello world")
+        artifact = ResearchArtifact.from_file(f, "composition/1/artifact/0")
+        assert artifact.artifact_id == "composition/1/artifact/0"
+        assert artifact.hash.algorithm == "sha256"
+        assert len(artifact.hash.value) == 64
+        assert artifact.mime_type  # non-empty mime type
+
+    def test_from_file_not_found_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            ResearchArtifact.from_file(tmp_path / "nonexistent.txt", "x")
+
+
+class TestCompositionFingerprint:
+    """Unit tests for CompositionFingerprint."""
+
+    def test_compute_deterministic(self):
+        artifacts = [
+            ResearchArtifact("a/0", HashValue("sha256", "aaa"), "text/plain"),
+            ResearchArtifact("a/1", HashValue("sha256", "bbb"), "text/csv"),
+        ]
+        fp1 = CompositionFingerprint.compute(artifacts)
+        fp2 = CompositionFingerprint.compute(list(reversed(artifacts)))
+        assert fp1.hash.value == fp2.hash.value  # order-independent
+
+    def test_to_from_jsonld(self):
+        artifacts = [ResearchArtifact("a/0", HashValue("sha256", "abc"), "text/plain")]
+        fp = CompositionFingerprint.compute(artifacts)
+        jld = fp.to_jsonld()
+        restored = CompositionFingerprint.from_jsonld(jld)
+        assert restored.hash.value == fp.hash.value
+
+
+class TestArtifactComposition:
+    """Unit tests for ArtifactComposition."""
+
+    def test_add_artifact_updates_fingerprint(self):
+        comp = ArtifactComposition()
+        assert comp.fingerprint is None
+        a = ResearchArtifact(
+            "comp/1/artifact/0", HashValue("sha256", "aaa"), "text/plain"
+        )
+        comp.add_artifact(a)
+        assert comp.fingerprint is not None
+
+    def test_get_by_hash(self):
+        comp = ArtifactComposition()
+        a = ResearchArtifact("x/0", HashValue("sha256", "abc"), "text/plain")
+        comp.add_artifact(a)
+        assert comp.get_by_hash("sha256:abc") is a
+        assert comp.get_by_hash("sha256:xyz") is None
+
+    def test_get_by_id(self):
+        comp = ArtifactComposition()
+        a = ResearchArtifact("x/0", HashValue("sha256", "abc"), "text/plain")
+        comp.add_artifact(a)
+        assert comp.get_by_id("x/0") is a
+        assert comp.get_by_id("x/9") is None
+
+    def test_next_artifact_id(self):
+        comp = ArtifactComposition(composition_id="composition/1")
+        assert comp.next_artifact_id() == "composition/1/artifact/0"
+        comp.add_artifact(
+            ResearchArtifact(
+                "composition/1/artifact/0", HashValue("sha256", "a"), "text/plain"
+            )
+        )
+        assert comp.next_artifact_id() == "composition/1/artifact/1"
+
+    def test_to_from_jsonld_roundtrip(self):
+        comp = ArtifactComposition()
+        comp.add_artifact(
+            ResearchArtifact(
+                "comp/1/artifact/0", HashValue("sha256", "aaa"), "text/plain"
+            )
+        )
+        comp.add_artifact(
+            ResearchArtifact(
+                "comp/1/artifact/1", HashValue("sha256", "bbb"), "text/csv"
+            )
+        )
+        jld = comp.to_jsonld()
+        restored = ArtifactComposition.from_jsonld(jld)
+        assert len(restored.artifacts) == 2
+        assert restored.fingerprint is not None
+
+
+class TestArtifactLocation:
+    """Unit tests for ArtifactLocation."""
+
+    def test_to_from_jsonld(self):
+        loc = ArtifactLocation("arr/0/loc/0", "comp/1/artifact/0", "data/input.csv")
+        jld = loc.to_jsonld()
+        assert jld["@id"] == "arr/0/loc/0"
+        assert jld["trov:artifact"]["@id"] == "comp/1/artifact/0"
+        assert jld["trov:path"] == "data/input.csv"
+        restored = ArtifactLocation.from_jsonld(jld)
+        assert restored.location_id == loc.location_id
+        assert restored.artifact_id == loc.artifact_id
+        assert restored.path == loc.path
+
+
+class TestArtifactArrangement:
+    """Unit tests for ArtifactArrangement."""
+
+    def test_from_directory(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "a.txt").write_text("alpha")
+        (d / "b.txt").write_text("beta")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="test"
+        )
+
+        assert arr.arrangement_id == "arrangement/0"
+        assert arr.comment == "test"
+        assert len(arr.locations) == 2
+        assert len(comp.artifacts) == 2
+
+    def test_from_directory_no_duplicate_artifacts(self, tmp_path):
+        """Identical files across two arrangements share artifacts in composition."""
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "same.txt").write_text("identical content")
+
+        comp = ArtifactComposition()
+        ArtifactArrangement.from_directory(d, comp, "arrangement/0")
+        ArtifactArrangement.from_directory(d, comp, "arrangement/1")
+
+        assert len(comp.artifacts) == 1  # same artifact reused
+
+    def test_to_path_hash_map(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("content")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(d, comp, "arrangement/0")
+        mapping = arr.to_path_hash_map(comp)
+
+        assert "file.txt" in mapping
+        assert mapping["file.txt"].startswith("sha256:")
+
+    def test_to_from_jsonld_roundtrip(self):
+        arr = ArtifactArrangement(
+            arrangement_id="arrangement/0",
+            comment="snapshot",
+            locations=[
+                ArtifactLocation(
+                    "arrangement/0/location/0", "comp/1/artifact/0", "data/in.csv"
+                )
+            ],
+        )
+        jld = arr.to_jsonld()
+        restored = ArtifactArrangement.from_jsonld(jld)
+        assert restored.arrangement_id == arr.arrangement_id
+        assert restored.comment == arr.comment
+        assert len(restored.locations) == 1
+
+    # ------------------------------------------------------------------
+    # Snapshot tests
+    # ------------------------------------------------------------------
+
+    def test_to_snapshot_contains_artifacts_and_locations(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "a.txt").write_text("alpha")
+        (d / "b.txt").write_text("beta")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="snap"
+        )
+        snap = arr.to_snapshot(comp)
+
+        assert snap["@type"] == "trov:ArrangementSnapshot"
+        assert snap["rdfs:comment"] == "snap"
+        assert len(snap["trov:hasArtifactLocation"]) == 2
+        assert len(snap["trov:hasArtifact"]) == 2
+
+    def test_to_snapshot_only_includes_referenced_artifacts(self, tmp_path):
+        """Artifacts in the composition but not referenced by this arrangement are excluded."""
+        d1 = tmp_path / "dir1"
+        d1.mkdir()
+        (d1 / "a.txt").write_text("alpha")
+
+        d2 = tmp_path / "dir2"
+        d2.mkdir()
+        (d2 / "b.txt").write_text("beta")
+
+        comp = ArtifactComposition()
+        arr1 = ArtifactArrangement.from_directory(d1, comp, "arrangement/0")
+        ArtifactArrangement.from_directory(d2, comp, "arrangement/1")
+
+        # composition has 2 artifacts; arr1 only references 1
+        assert len(comp.artifacts) == 2
+        snap = arr1.to_snapshot(comp)
+        assert len(snap["trov:hasArtifact"]) == 1
+
+    def test_save_and_load_snapshot_roundtrip(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("content")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="original"
+        )
+
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # Load into a fresh composition
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, new_comp, "arrangement/99", comment=None
+        )
+
+        assert restored.arrangement_id == "arrangement/99"
+        assert restored.comment == "original"  # taken from snapshot
+        assert len(restored.locations) == 1
+        assert restored.locations[0].path == "file.txt"
+        assert len(new_comp.artifacts) == 1
+
+    def test_load_snapshot_comment_override(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("x")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="original"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, new_comp, "arrangement/0", comment="overridden"
+        )
+        assert restored.comment == "overridden"
+
+    def test_load_snapshot_deduplicates_artifacts(self, tmp_path):
+        """Loading a snapshot whose artifacts already exist in the target composition does not create duplicates."""
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("same content")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="snap"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # target_comp already contains the same artifact (scanned independently)
+        target_comp = ArtifactComposition()
+        ArtifactArrangement.from_directory(d, target_comp, "arrangement/0")
+        assert len(target_comp.artifacts) == 1
+
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, target_comp, "arrangement/1"
+        )
+        # Still only one artifact - no duplicate
+        assert len(target_comp.artifacts) == 1
+        assert restored.locations[0].artifact_id == target_comp.artifacts[0].artifact_id
+
+    def test_from_snapshot_remaps_location_ids(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "f.txt").write_text("data")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(d, comp, "arrangement/0")
+        snap = arr.to_snapshot(comp)
+
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.from_snapshot(snap, new_comp, "arrangement/7")
+        assert restored.locations[0].location_id == "arrangement/7/location/0"
+
+    def test_add_arrangement_from_snapshot_on_tro_model(self, tmp_path):
+        """TransparentResearchObject.add_arrangement_from_snapshot wires up correctly."""
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "data.txt").write_text("hello")
+
+        # Create a snapshot independently
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="pre-computed"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # Load into a fresh TRO model
+        tro_model = TransparentResearchObject()
+        added = tro_model.add_arrangement_from_snapshot(snap_path)
+
+        assert added.arrangement_id == "arrangement/0"
+        assert added.comment == "pre-computed"
+        assert len(tro_model.arrangements) == 1
+        assert len(tro_model.composition.artifacts) == 1
+        assert (
+            tro_model.arrangements[0].locations[0].artifact_id
+            == tro_model.composition.artifacts[0].artifact_id
+        )
+
+
+class TestTRSCapability:
+    """Unit tests for TRSCapability."""
+
+    def test_to_from_jsonld(self):
+        cap = TRSCapability("trs/capability/0", "trov:CanProvideInternetIsolation")
+        jld = cap.to_jsonld()
+        restored = TRSCapability.from_jsonld(jld)
+        assert restored.capability_id == cap.capability_id
+        assert restored.capability_type == cap.capability_type
+
+
+class TestTrustedResearchSystem:
+    """Unit tests for TrustedResearchSystem."""
+
+    def test_from_profile_preserves_extra_fields(self):
+        profile = {
+            "trov:name": "My TRS",
+            "trov:hasCapability": [
+                {"@id": "trs/cap/0", "@type": "trov:CanProvideInternetIsolation"}
+            ],
+            "trov:publicKey": None,
+            "trov:custom": "value",
+        }
+        trs = TrustedResearchSystem.from_profile(profile, trs_id="trs")
+        assert trs.extra_fields.get("trov:name") == "My TRS"
+        assert trs.extra_fields.get("trov:custom") == "value"
+        assert len(trs.capabilities) == 1
+
+    def test_to_jsonld_includes_extra_fields(self):
+        trs = TrustedResearchSystem(
+            trs_id="trs",
+            extra_fields={"trov:name": "foo", "trov:owner": "bar"},
+        )
+        jld = trs.to_jsonld()
+        assert jld["trov:name"] == "foo"
+        assert jld["trov:owner"] == "bar"
+
+    def test_from_to_jsonld_roundtrip(self):
+        trs = TrustedResearchSystem(
+            trs_id="trs",
+            name="Test TRS",
+            description="desc",
+            capabilities=[
+                TRSCapability("trs/cap/0", "trov:CanProvideInternetIsolation")
+            ],
+            extra_fields={"trov:name": "custom-name"},
+        )
+        jld = trs.to_jsonld()
+        restored = TrustedResearchSystem.from_jsonld(jld)
+        assert restored.trs_id == trs.trs_id
+        assert len(restored.capabilities) == 1
+        assert restored.extra_fields.get("trov:name") == "custom-name"
+
+
+class TestTimeStampingAuthority:
+    """Unit tests for TimeStampingAuthority."""
+
+    def test_to_from_jsonld(self):
+        tsa = TimeStampingAuthority(tsa_id="tsa", public_key="-----BEGIN...")
+        jld = tsa.to_jsonld()
+        assert jld["@id"] == "tsa"
+        assert jld["@type"] == "trov:TimeStampingAuthority"
+        assert jld["trov:publicKey"] == "-----BEGIN..."
+        restored = TimeStampingAuthority.from_jsonld(jld)
+        assert restored.tsa_id == tsa.tsa_id
+        assert restored.public_key == tsa.public_key
+
+    def test_without_public_key(self):
+        tsa = TimeStampingAuthority()
+        jld = tsa.to_jsonld()
+        assert "trov:publicKey" not in jld
+
+
+class TestPerformanceAttribute:
+    """Unit tests for PerformanceAttribute."""
+
+    def test_to_from_jsonld(self):
+        attr = PerformanceAttribute(
+            "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"
+        )
+        jld = attr.to_jsonld()
+        restored = PerformanceAttribute.from_jsonld(jld)
+        assert restored.attribute_id == attr.attribute_id
+        assert restored.attribute_type == attr.attribute_type
+        assert restored.warranted_by_id == attr.warranted_by_id
+
+
+class TestTrustedResearchPerformance:
+    """Unit tests for TrustedResearchPerformance."""
+
+    def test_to_from_jsonld_roundtrip(self):
+        trp = TrustedResearchPerformance(
+            performance_id="trp/0",
+            comment="test run",
+            conducted_by_id="trs",
+            started_at=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            ended_at=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            accessed_arrangements=[ArrangementRef("arrangement/0", path="/workdir")],
+            contributed_to_arrangements=[ArrangementRef("arrangement/1")],
+            attributes=[
+                PerformanceAttribute(
+                    "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"
+                )
+            ],
+        )
+        jld = trp.to_jsonld()
+        restored = TrustedResearchPerformance.from_jsonld(jld)
+        assert restored.performance_id == trp.performance_id
+        assert restored.comment == trp.comment
+        assert restored.started_at == trp.started_at
+        assert restored.ended_at == trp.ended_at
+        assert restored.accessed_arrangements == trp.accessed_arrangements
+        assert restored.contributed_to_arrangements == trp.contributed_to_arrangements
+        assert len(restored.attributes) == 1
+
+    def test_optional_fields_absent_when_none(self):
+        trp = TrustedResearchPerformance(performance_id="trp/0")
+        jld = trp.to_jsonld()
+        assert "trov:startedAtTime" not in jld
+        assert "trov:endedAtTime" not in jld
+        assert "trov:accessedArrangement" not in jld
+        assert "trov:contributedToArrangement" not in jld
+
+
+class TestTROAttribute:
+    """Unit tests for TROAttribute."""
+
+    def test_to_from_jsonld(self):
+        attr = TROAttribute(
+            "tro/attribute/0", "trov:IncludesAllInputData", "trp/0/attribute/0"
+        )
+        jld = attr.to_jsonld()
+        restored = TROAttribute.from_jsonld(jld)
+        assert restored.attribute_id == attr.attribute_id
+        assert restored.attribute_type == attr.attribute_type
+        assert restored.warranted_by_id == attr.warranted_by_id
+
+
+class TestTransparentResearchObject:
+    """Unit tests for the root TransparentResearchObject model."""
+
+    def _make_tro(self):
+        return TransparentResearchObject(
+            name="Test TRO",
+            description="A test",
+            creator="Tester",
+        )
+
+    def test_to_jsonld_structure(self):
+        tro = self._make_tro()
+        jld = tro.to_jsonld()
+        assert "@context" in jld
+        assert "@graph" in jld
+        graph = jld["@graph"][0]
+        assert graph["schema:name"] == "Test TRO"
+        assert "trov:TransparentResearchObject" in graph["@type"]
+        assert "trov:hasComposition" in graph
+        assert "trov:hasArrangement" in graph
+        assert "trov:hasPerformance" in graph
+
+    def test_from_jsonld_roundtrip(self):
+        tro = self._make_tro()
+        jld = tro.to_jsonld()
+        restored = TransparentResearchObject.from_jsonld(jld)
+        assert restored.name == tro.name
+        assert restored.description == tro.description
+        assert restored.creator == tro.creator
+
+    def test_from_jsonld_old_vocab_raises(self):
+        jld = {
+            "@context": [{}],
+            "@graph": [
+                {
+                    "@id": "tro",
+                    "trov:vocabularyVersion": "0.0.1",
+                    "trov:wasAssembledBy": {"trov:hasCapability": []},
+                    "trov:hasArrangement": [],
+                    "trov:hasComposition": {
+                        "@id": "composition/1",
+                        "trov:hasArtifact": [],
+                    },
+                    "trov:hasPerformance": [],
+                    "trov:hasAttribute": [],
+                }
+            ],
+        }
+        with pytest.raises(RuntimeError, match="older version"):
+            TransparentResearchObject.from_jsonld(jld)
+
+    def test_add_arrangement_updates_composition(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "a.txt").write_text("alpha")
+        (d / "b.txt").write_text("beta")
+
+        tro = self._make_tro()
+        arr = tro.add_arrangement(str(d), comment="snap1")
+
+        assert len(tro.arrangements) == 1
+        assert len(tro.composition.artifacts) == 2
+        assert arr.arrangement_id == "arrangement/0"
+
+    def test_add_performance_validates_arrangements(self):
+        tro = self._make_tro()
+        with pytest.raises(ValueError, match="does not exist"):
+            tro.add_performance(
+                start_time=datetime.datetime.now(),
+                end_time=datetime.datetime.now(),
+                accessed_arrangement="arrangement/99",
+                modified_arrangement="arrangement/0",
+            )
+
+    def test_save_load_roundtrip(self, tmp_path):
+        tro = self._make_tro()
+        filepath = tmp_path / "test.jsonld"
+        tro.save(str(filepath))
+        assert filepath.exists()
+        restored = TransparentResearchObject.load(str(filepath))
+        assert restored.name == tro.name
+        assert restored.creator == tro.creator
+
+    def test_tsa_roundtrip(self):
+        tro = self._make_tro()
+        tro.tsa = TimeStampingAuthority(
+            tsa_id="tsa", public_key="-----BEGIN PUBLIC KEY-----"
+        )
+        jld = tro.to_jsonld()
+        restored = TransparentResearchObject.from_jsonld(jld)
+        assert restored.tsa is not None
+        assert restored.tsa.public_key == "-----BEGIN PUBLIC KEY-----"
+
+    def test_full_workflow_roundtrip(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "input.csv").write_text("a,b\n1,2\n")
+        (d / "script.py").write_text("print('hello')\n")
+
+        tro = TransparentResearchObject(
+            name="Full Workflow Test",
+            trs=TrustedResearchSystem(
+                trs_id="trs",
+                capabilities=[
+                    TRSCapability("trs/cap/0", "trov:CanProvideInternetIsolation")
+                ],
+            ),
+        )
+
+        tro.add_arrangement(str(d), comment="before")
+        (d / "output.txt").write_text("result\n")
+        tro.add_arrangement(str(d), comment="after")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 6, 1, 10, 0),
+            end_time=datetime.datetime(2024, 6, 1, 11, 0),
+            comment="run script",
+            accessed_arrangement="arrangement/0",
+            modified_arrangement="arrangement/1",
+            attrs=["trov:InternetIsolation"],
+        )
+
+        filepath = tmp_path / "workflow.jsonld"
+        tro.save(str(filepath))
+        restored = TransparentResearchObject.load(str(filepath))
+
+        assert len(restored.arrangements) == 2
+        assert len(restored.performances) == 1
+        assert restored.performances[0].comment == "run script"
+        assert len(restored.performances[0].attributes) == 1
+
+
+class TestReplicationPackageModel:
+    """Tests for the ReplicationPackage class using the model API."""
+
+    def test_verify_directory_matches(self, tmp_path):
+        from tro_utils.replication_package import ReplicationPackage
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "file.txt").write_text("hello")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(workdir, comp, "arrangement/0")
+
+        result = ReplicationPackage.verify(arr, comp, workdir)
+        assert result.is_valid
+        assert not result.files_missing_in_arrangement
+        assert not result.mismatched_hashes
+        assert not result.files_missing_in_package
+
+    def test_verify_missing_file_in_package(self, tmp_path):
+        from tro_utils.replication_package import ReplicationPackage
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "file.txt").write_text("hello")
+        (workdir / "extra.txt").write_text("world")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(workdir, comp, "arrangement/0")
+
+        # Remove one file from package before verifying
+        (workdir / "extra.txt").unlink()
+
+        result = ReplicationPackage.verify(arr, comp, workdir)
+        assert not result.is_valid
+        assert "extra.txt" in result.files_missing_in_package
+
+    def test_verify_extra_file_in_package(self, tmp_path):
+        from tro_utils.replication_package import ReplicationPackage
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "file.txt").write_text("hello")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(workdir, comp, "arrangement/0")
+
+        # Add a new file not in the arrangement
+        (workdir / "unexpected.txt").write_text("surprise")
+
+        result = ReplicationPackage.verify(arr, comp, workdir)
+        assert not result.is_valid
+        assert "unexpected.txt" in result.files_missing_in_arrangement
+
+    def test_verify_zip_matches(self, tmp_path):
+        from tro_utils.replication_package import ReplicationPackage
+        import zipfile
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "data.csv").write_text("a,b\n1,2\n")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(workdir, comp, "arrangement/0")
+
+        # Package into a zip
+        zip_path = tmp_path / "package.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(workdir / "data.csv", "data.csv")
+
+        result = ReplicationPackage.verify(arr, comp, zip_path)
+        assert result.is_valid
+
+    def test_verify_zip_with_subpath(self, tmp_path):
+        from tro_utils.replication_package import ReplicationPackage
+        import zipfile
+
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "data.csv").write_text("a,b\n1,2\n")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(workdir, comp, "arrangement/0")
+
+        # Package into zip with a prefix subpath
+        zip_path = tmp_path / "package.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(workdir / "data.csv", "subdir/data.csv")
+
+        result = ReplicationPackage.verify(arr, comp, zip_path, subpath="subdir")
+        assert result.is_valid
+
+    def test_verification_result_is_valid_property(self):
+        from tro_utils.replication_package import VerificationResult
+
+        ok = VerificationResult()
+        assert ok.is_valid
+
+        bad = VerificationResult(files_missing_in_arrangement=["x"])
+        assert not bad.is_valid
