@@ -562,7 +562,7 @@ class TestCLIPerformance:
     def test_performance_add_id_with_path(
         self, runner, tmp_path, temp_workspace, trs_profile
     ):
-        """ARRANGEMENT_ID:PATH syntax is parsed and serialised as trov:path."""
+        """ARRANGEMENT_ID:PATH syntax is parsed and serialised as trov:mountPath."""
         tro_file = tmp_path / "test_tro.jsonld"
         self._setup_tro_with_arrangements(
             runner,
@@ -594,10 +594,10 @@ class TestCLIPerformance:
         perf = data["@graph"][0]["trov:hasPerformance"][0]
         accessed = perf["trov:accessedArrangement"]
         assert accessed["@id"] == "arrangement/0"
-        assert accessed["trov:path"] == "/mnt/input"
+        assert accessed["trov:mountPath"] == "/mnt/input"
         contributed = perf["trov:contributedToArrangement"]
         assert contributed["@id"] == "arrangement/1"
-        assert contributed["trov:path"] == "/mnt/output"
+        assert contributed["trov:mountPath"] == "/mnt/output"
 
     def test_performance_add_multiple_accessed_with_paths(
         self, runner, tmp_path, temp_workspace, trs_profile
@@ -653,5 +653,5 @@ class TestCLIPerformance:
         assert isinstance(accessed, list)
         assert len(accessed) == 2
         by_id = {r["@id"]: r for r in accessed}
-        assert by_id["arrangement/0"]["trov:path"] == "/mnt/a"
-        assert "trov:path" not in by_id["arrangement/1"]
+        assert by_id["arrangement/0"]["trov:mountPath"] == "/mnt/a"
+        assert "trov:mountPath" not in by_id["arrangement/1"]
