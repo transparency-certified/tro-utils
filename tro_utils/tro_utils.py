@@ -327,7 +327,7 @@ class TRO:
                     "creator": "trs",
                     "createdDate": "None",
                 }
-                for loc in sorted(arr.locations, key=lambda l: l.path)
+                for loc in sorted(arr.locations, key=lambda _: _.path)
             }
             arrangements[arr.arrangement_id] = {
                 "name": arr.comment,

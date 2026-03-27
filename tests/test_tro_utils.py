@@ -4,8 +4,6 @@ import datetime
 import importlib
 import json
 import os
-import sys
-from hashlib import sha256
 from importlib.metadata import PackageNotFoundError
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +12,21 @@ import pytest
 
 from tro_utils import TRPAttribute
 from tro_utils.tro_utils import TRO
+from tro_utils.models import (
+    ArtifactArrangement,
+    ArtifactComposition,
+    ArtifactLocation,
+    CompositionFingerprint,
+    HashValue,
+    PerformanceAttribute,
+    ResearchArtifact,
+    TimeStampingAuthority,
+    TransparentResearchObject,
+    TROAttribute,
+    TRSCapability,
+    TrustedResearchPerformance,
+    TrustedResearchSystem,
+)
 
 
 # Helper function to create TRO with proper GPG setup
@@ -1311,22 +1324,6 @@ class TestReplicationPackageVerification:
 # =============================================================================
 # Tests for the new OOP model classes (tro_utils.models)
 # =============================================================================
-
-from tro_utils.models import (
-    ArtifactArrangement,
-    ArtifactComposition,
-    ArtifactLocation,
-    CompositionFingerprint,
-    HashValue,
-    PerformanceAttribute,
-    ResearchArtifact,
-    TimeStampingAuthority,
-    TransparentResearchObject,
-    TROAttribute,
-    TRSCapability,
-    TrustedResearchPerformance,
-    TrustedResearchSystem,
-)
 
 
 class TestHashValue:
