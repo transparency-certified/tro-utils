@@ -239,6 +239,86 @@ class TestTROCreation:
 class TestTROArrangements:
     """Test TRO arrangement operations."""
 
+    def test_add_arrangement_from_snapshot(self, tmp_path, gpg_setup):
+        """add_arrangement_from_snapshot loads a pre-computed snapshot into the TRO."""
+        # Create a snapshot independently
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "data.csv").write_text("a,b\n1,2")
+        (workdir / "readme.txt").write_text("desc")
+
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="static mount"
+        )
+        snap_path = tmp_path / "mount.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        # Load into a TRO
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement_from_snapshot(str(snap_path))
+        tro.save()
+
+        arrangements = tro.list_arrangements()
+        assert len(arrangements) == 1
+        assert arrangements[0]["rdfs:comment"] == "static mount"
+        paths = [
+            loc["trov:path"] for loc in arrangements[0]["trov:hasArtifactLocation"]
+        ]
+        assert "data.csv" in paths
+        assert "readme.txt" in paths
+
+    def test_add_arrangement_from_snapshot_comment_override(self, tmp_path, gpg_setup):
+        """comment kwarg overrides the comment stored in the snapshot file."""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "f.txt").write_text("x")
+
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="original comment"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement_from_snapshot(str(snap_path), comment="overridden")
+
+        arrangements = tro.list_arrangements()
+        assert arrangements[0]["rdfs:comment"] == "overridden"
+
+    def test_add_arrangement_from_snapshot_deduplicates_artifacts(
+        self, tmp_path, gpg_setup
+    ):
+        """Files already in the TRO composition are not duplicated when a snapshot is loaded."""
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (workdir / "common.txt").write_text("shared content")
+
+        # First add the directory normally so the artifact is in the TRO composition
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
+        )
+        tro.add_arrangement(str(workdir), comment="live")
+        artifact_count_after_first = len(tro._model.composition.artifacts)
+
+        # Create a snapshot with the same file
+        snap_comp = ArtifactComposition()
+        snap_arr = ArtifactArrangement.from_directory(
+            workdir, snap_comp, "arrangement/0", comment="snap"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        snap_arr.save_snapshot(snap_path, snap_comp)
+
+        tro.add_arrangement_from_snapshot(str(snap_path))
+
+        # Composition artifact count must not have grown
+        assert len(tro._model.composition.artifacts) == artifact_count_after_first
+
     def test_add_arrangement(self, temp_workspace, tmp_path, gpg_setup, trs_profile):
         """Test adding an arrangement to a TRO."""
         tro = create_tro_with_gpg(
@@ -405,6 +485,64 @@ class TestTROPerformances:
                 end_time=end_time,
                 accessed_arrangement="arrangement/99",
                 modified_arrangement="arrangement/0",
+                attrs=[],
+            )
+
+    def test_add_performance_multiple_arrangements(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """add_performance accepts a list of arrangement IDs for accessed/modified."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+        (temp_workspace / "out2.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="C")
+
+        start_time = datetime.datetime(2024, 1, 1, 10, 0, 0)
+        end_time = datetime.datetime(2024, 1, 1, 11, 0, 0)
+
+        tro.add_performance(
+            start_time=start_time,
+            end_time=end_time,
+            comment="multi",
+            accessed_arrangement=["arrangement/0", "arrangement/1"],
+            modified_arrangement=["arrangement/2"],
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        # Two accessed → serialised as a list
+        accessed = perf["trov:accessedArrangement"]
+        assert isinstance(accessed, list)
+        assert len(accessed) == 2
+        assert {r["@id"] for r in accessed} == {"arrangement/0", "arrangement/1"}
+        # One contributed → serialised as a plain dict
+        contributed = perf["trov:contributedToArrangement"]
+        assert isinstance(contributed, dict)
+        assert contributed["@id"] == "arrangement/2"
+
+    def test_add_performance_multiple_arrangements_invalid(
+        self, tmp_path, gpg_setup, trs_profile
+    ):
+        """Providing any invalid ID in a list raises ValueError."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        start_time = datetime.datetime(2024, 1, 1, 10, 0, 0)
+        end_time = datetime.datetime(2024, 1, 1, 11, 0, 0)
+        with pytest.raises(ValueError, match="does not exist"):
+            tro.add_performance(
+                start_time=start_time,
+                end_time=end_time,
+                accessed_arrangement=["arrangement/0", "arrangement/999"],
+                modified_arrangement=None,
                 attrs=[],
             )
 
@@ -1587,6 +1725,154 @@ class TestArtifactArrangement:
         assert restored.arrangement_id == arr.arrangement_id
         assert restored.comment == arr.comment
         assert len(restored.locations) == 1
+
+    # ------------------------------------------------------------------
+    # Snapshot tests
+    # ------------------------------------------------------------------
+
+    def test_to_snapshot_contains_artifacts_and_locations(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "a.txt").write_text("alpha")
+        (d / "b.txt").write_text("beta")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="snap"
+        )
+        snap = arr.to_snapshot(comp)
+
+        assert snap["@type"] == "trov:ArrangementSnapshot"
+        assert snap["rdfs:comment"] == "snap"
+        assert len(snap["trov:hasArtifactLocation"]) == 2
+        assert len(snap["trov:hasArtifact"]) == 2
+
+    def test_to_snapshot_only_includes_referenced_artifacts(self, tmp_path):
+        """Artifacts in the composition but not referenced by this arrangement are excluded."""
+        d1 = tmp_path / "dir1"
+        d1.mkdir()
+        (d1 / "a.txt").write_text("alpha")
+
+        d2 = tmp_path / "dir2"
+        d2.mkdir()
+        (d2 / "b.txt").write_text("beta")
+
+        comp = ArtifactComposition()
+        arr1 = ArtifactArrangement.from_directory(d1, comp, "arrangement/0")
+        ArtifactArrangement.from_directory(d2, comp, "arrangement/1")
+
+        # composition has 2 artifacts; arr1 only references 1
+        assert len(comp.artifacts) == 2
+        snap = arr1.to_snapshot(comp)
+        assert len(snap["trov:hasArtifact"]) == 1
+
+    def test_save_and_load_snapshot_roundtrip(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("content")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="original"
+        )
+
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # Load into a fresh composition
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, new_comp, "arrangement/99", comment=None
+        )
+
+        assert restored.arrangement_id == "arrangement/99"
+        assert restored.comment == "original"  # taken from snapshot
+        assert len(restored.locations) == 1
+        assert restored.locations[0].path == "file.txt"
+        assert len(new_comp.artifacts) == 1
+
+    def test_load_snapshot_comment_override(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("x")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="original"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, new_comp, "arrangement/0", comment="overridden"
+        )
+        assert restored.comment == "overridden"
+
+    def test_load_snapshot_deduplicates_artifacts(self, tmp_path):
+        """Loading a snapshot whose artifacts already exist in the target composition does not create duplicates."""
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "file.txt").write_text("same content")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="snap"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # target_comp already contains the same artifact (scanned independently)
+        target_comp = ArtifactComposition()
+        ArtifactArrangement.from_directory(d, target_comp, "arrangement/0")
+        assert len(target_comp.artifacts) == 1
+
+        restored = ArtifactArrangement.load_snapshot(
+            snap_path, target_comp, "arrangement/1"
+        )
+        # Still only one artifact - no duplicate
+        assert len(target_comp.artifacts) == 1
+        assert restored.locations[0].artifact_id == target_comp.artifacts[0].artifact_id
+
+    def test_from_snapshot_remaps_location_ids(self, tmp_path):
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "f.txt").write_text("data")
+
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(d, comp, "arrangement/0")
+        snap = arr.to_snapshot(comp)
+
+        new_comp = ArtifactComposition()
+        restored = ArtifactArrangement.from_snapshot(snap, new_comp, "arrangement/7")
+        assert restored.locations[0].location_id == "arrangement/7/location/0"
+
+    def test_add_arrangement_from_snapshot_on_tro_model(self, tmp_path):
+        """TransparentResearchObject.add_arrangement_from_snapshot wires up correctly."""
+        d = tmp_path / "workdir"
+        d.mkdir()
+        (d / "data.txt").write_text("hello")
+
+        # Create a snapshot independently
+        comp = ArtifactComposition()
+        arr = ArtifactArrangement.from_directory(
+            d, comp, "arrangement/0", comment="pre-computed"
+        )
+        snap_path = tmp_path / "snap.jsonld"
+        arr.save_snapshot(snap_path, comp)
+
+        # Load into a fresh TRO model
+        tro_model = TransparentResearchObject()
+        added = tro_model.add_arrangement_from_snapshot(snap_path)
+
+        assert added.arrangement_id == "arrangement/0"
+        assert added.comment == "pre-computed"
+        assert len(tro_model.arrangements) == 1
+        assert len(tro_model.composition.artifacts) == 1
+        assert (
+            tro_model.arrangements[0].locations[0].artifact_id
+            == tro_model.composition.artifacts[0].artifact_id
+        )
 
 
 class TestTRSCapability:

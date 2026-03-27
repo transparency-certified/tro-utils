@@ -121,6 +121,34 @@ class TransparentResearchObject(TROVModel):
         self.arrangements.append(arrangement)
         return arrangement
 
+    def add_arrangement_from_snapshot(
+        self,
+        filepath: str | pathlib.Path,
+        comment: str | None = None,
+    ) -> ArtifactArrangement:
+        """Load a pre-computed arrangement snapshot and merge it into this TRO.
+
+        Artifacts in the snapshot are merged into the existing composition by
+        content hash, avoiding duplicate entries.
+
+        Args:
+            filepath: Path to a JSON-LD snapshot file produced by
+                :meth:`~tro_utils.models.arrangement.ArtifactArrangement.save_snapshot`.
+            comment: Override the comment stored in the snapshot file.
+
+        Returns:
+            The newly added :class:`ArtifactArrangement`.
+        """
+        arrangement_id = f"arrangement/{len(self.arrangements)}"
+        arrangement = ArtifactArrangement.load_snapshot(
+            filepath=filepath,
+            target_composition=self.composition,
+            arrangement_id=arrangement_id,
+            comment=comment,
+        )
+        self.arrangements.append(arrangement)
+        return arrangement
+
     def add_performance(
         self,
         start_time: datetime.datetime,

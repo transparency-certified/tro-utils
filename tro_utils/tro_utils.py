@@ -155,6 +155,9 @@ class TRO:
             resolve_symlinks=resolve_symlinks,
         )
 
+    def add_arrangement_from_snapshot(self, filepath, comment=None):
+        self._model.add_arrangement_from_snapshot(filepath=filepath, comment=comment)
+
     def save(self):
         self._model.save(self.tro_filename)
 

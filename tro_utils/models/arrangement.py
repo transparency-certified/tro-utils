@@ -8,6 +8,7 @@ stored in the :class:`~tro_utils.models.composition.ArtifactComposition`.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 from dataclasses import dataclass, field
@@ -211,3 +212,138 @@ class ArtifactArrangement(TROVModel):
             comment=data.get("rdfs:comment", ""),
             locations=locations,
         )
+
+    # ------------------------------------------------------------------
+    # Snapshot serialisation / deserialisation
+    # ------------------------------------------------------------------
+
+    def to_snapshot(self, composition: ArtifactComposition) -> dict[str, Any]:
+        """Serialise this arrangement and its referenced artifacts as a standalone dict.
+
+        The returned structure is self-contained: it embeds the subset of
+        *composition* artifacts that are referenced by this arrangement so the
+        snapshot can be loaded into a different TRO without the original
+        composition.
+
+        Args:
+            composition: The composition that owns the artifacts referenced by
+                this arrangement.
+
+        Returns:
+            A JSON-serialisable dict.
+        """
+        artifact_ids = {loc.artifact_id for loc in self.locations}
+        artifacts = [
+            a.to_jsonld()
+            for a in composition.artifacts
+            if a.artifact_id in artifact_ids
+        ]
+        return {
+            "@type": "trov:ArrangementSnapshot",
+            "rdfs:comment": self.comment,
+            "trov:hasArtifactLocation": [loc.to_jsonld() for loc in self.locations],
+            "trov:hasArtifact": artifacts,
+        }
+
+    def save_snapshot(
+        self, filepath: str | pathlib.Path, composition: ArtifactComposition
+    ) -> None:
+        """Write this arrangement as a standalone snapshot JSON-LD file.
+
+        Args:
+            filepath: Destination path (will be created/overwritten).
+            composition: The composition that owns the referenced artifacts.
+        """
+        with open(filepath, "w") as f:
+            json.dump(self.to_snapshot(composition), f, indent=2, sort_keys=True)
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        data: dict[str, Any],
+        target_composition: ArtifactComposition,
+        arrangement_id: str,
+        comment: str | None = None,
+    ) -> "ArtifactArrangement":
+        """Merge snapshot data into *target_composition* and return a new arrangement.
+
+        Artifacts are matched by content hash so duplicates are never inserted.
+        Location IDs are rewritten to fit the new *arrangement_id*.
+
+        Args:
+            data: Dict previously produced by :meth:`to_snapshot`.
+            target_composition: The composition to merge artifacts into.
+            arrangement_id: The ``@id`` to assign to the new arrangement.
+            comment: Override the comment stored in *data* when provided.
+
+        Returns:
+            A new :class:`ArtifactArrangement` whose locations point to
+            artifacts in *target_composition*.
+        """
+        from .artifact import ResearchArtifact
+
+        # Build a local lookup: snapshot-local artifact @id → ResearchArtifact
+        snap_artifacts: dict[str, ResearchArtifact] = {
+            art_data["@id"]: ResearchArtifact.from_jsonld(art_data)
+            for art_data in data.get("trov:hasArtifact", [])
+        }
+
+        # Merge each snapshot artifact into the target composition, tracking IDs
+        id_remap: dict[str, str] = {}  # snapshot_id → target composition id
+        for snap_id, artifact in snap_artifacts.items():
+            hash_str = artifact.hash.to_string()
+            existing = target_composition.get_by_hash(hash_str)
+            if existing is not None:
+                id_remap[snap_id] = existing.artifact_id
+            else:
+                new_id = target_composition.next_artifact_id()
+                target_composition.add_artifact(
+                    ResearchArtifact(
+                        artifact_id=new_id,
+                        hash=artifact.hash,
+                        mime_type=artifact.mime_type,
+                    )
+                )
+                id_remap[snap_id] = new_id
+
+        # Rebuild locations with remapped artifact IDs
+        locations: list[ArtifactLocation] = []
+        for i, loc_data in enumerate(data.get("trov:hasArtifactLocation", [])):
+            snap_art_id = loc_data["trov:artifact"]["@id"]
+            locations.append(
+                ArtifactLocation(
+                    location_id=f"{arrangement_id}/location/{i}",
+                    artifact_id=id_remap[snap_art_id],
+                    path=loc_data["trov:path"],
+                )
+            )
+
+        return cls(
+            arrangement_id=arrangement_id,
+            comment=comment if comment is not None else data.get("rdfs:comment", ""),
+            locations=locations,
+        )
+
+    @classmethod
+    def load_snapshot(
+        cls,
+        filepath: str | pathlib.Path,
+        target_composition: ArtifactComposition,
+        arrangement_id: str,
+        comment: str | None = None,
+    ) -> "ArtifactArrangement":
+        """Load a snapshot file and merge it into *target_composition*.
+
+        Args:
+            filepath: Path to a JSON-LD snapshot file previously saved with
+                :meth:`save_snapshot`.
+            target_composition: The composition to merge artifacts into.
+            arrangement_id: The ``@id`` to assign to the new arrangement.
+            comment: Override the comment stored in the file when provided.
+
+        Returns:
+            A new :class:`ArtifactArrangement`.
+        """
+        with open(filepath) as f:
+            data = json.load(f)
+        return cls.from_snapshot(data, target_composition, arrangement_id, comment)

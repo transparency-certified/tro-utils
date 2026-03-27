@@ -32,9 +32,12 @@ Verifies a replication package (directory or `.zip`) against the hashes stored i
 
 ```
 tro-utils arrangement add <directory> [-m COMMENT] [-i IGNORE]
+tro-utils arrangement add --from-snapshot <snapshot.jsonld> [-m COMMENT]
+tro-utils arrangement snapshot <directory> -o <snapshot.jsonld> [-m COMMENT] [-i IGNORE]
 tro-utils arrangement list [-v]
 ```
-Adds a directory snapshot as a new arrangement, or lists existing arrangements.
+Adds a directory snapshot as a new arrangement, lists existing arrangements, or computes a
+reusable arrangement snapshot file without a TRO (see [Arrangement snapshots](#arrangement-snapshots)).
 
 ```
 tro-utils composition info [-v]
@@ -45,6 +48,14 @@ Shows artifacts in the current composition with their MIME type and hash.
 tro-utils performance add [-m COMMENT] [-s START] [-e END] [-a ATTRIBUTE] [-A ACCESSED] [-M CONTRIBUTED]
 ```
 Records a `TrustedResearchPerformance` entry in the TRO.
+`-A` and `-M` can be repeated to reference multiple input or output arrangements:
+
+```bash
+tro-utils --declaration my.jsonld performance add \
+  -m "Processing run" \
+  -A arrangement/0 -A arrangement/1 \
+  -M arrangement/2
+```
 
 ```
 tro-utils sign
@@ -58,7 +69,112 @@ Renders a Jinja2 report template with an embedded workflow diagram.
 
 ---
 
-## Python API
+## Arrangement snapshots
+
+Scanning a large directory is expensive. `arrangement snapshot` decouples the scan from the TRO
+creation step: compute the snapshot once and reuse it across multiple TROs or workflow runs.
+
+### Compute a snapshot (no TRO required)
+
+```bash
+tro-utils arrangement snapshot /mnt/large-dataset \
+  -m "Reference dataset v1.2" \
+  -o dataset-v1.2.jsonld
+```
+
+This produces a self-contained JSON-LD file that records every file path and its SHA-256 hash,
+along with the MIME type of each artifact. No TRO declaration file is needed.
+
+### Reuse a snapshot when building a TRO
+
+```bash
+# Use the pre-computed snapshot instead of re-scanning
+tro-utils --declaration my.jsonld arrangement add --from-snapshot dataset-v1.2.jsonld
+
+# Optionally override the comment stored in the snapshot
+tro-utils --declaration my.jsonld arrangement add \
+  --from-snapshot dataset-v1.2.jsonld \
+  -m "Static data mount"
+```
+
+Artifacts already present in the TRO composition are matched by content hash — no duplicates are
+ever inserted, even if the same file appears in multiple snapshots or live arrangements.
+
+---
+
+## Multiple accessed / contributed arrangements
+
+A `TrustedResearchPerformance` can reference more than one input (accessed) or output (contributed)
+arrangement. This models workflows that merge several data sources or produce several outputs.
+
+### CLI
+
+Repeat `-A` / `-M` as many times as needed:
+
+```bash
+tro-utils --declaration my.jsonld performance add \
+  -m "Merge and process" \
+  -A arrangement/0 \
+  -A arrangement/1 \
+  -M arrangement/2
+```
+
+When a single arrangement is provided the JSON-LD value is a plain object; when multiple are
+provided it becomes a list — both forms are handled transparently on load.
+
+### Python API
+
+```python
+tro.add_performance(
+    start_time=start,
+    end_time=end,
+    comment="Merge and process",
+    accessed_arrangement=["arrangement/0", "arrangement/1"],  # list accepted
+    modified_arrangement="arrangement/2",                     # single string also accepted
+    attrs=[TRPAttribute.NET_ISOLATION],
+)
+```
+
+The `accessed_arrangement` and `modified_arrangement` parameters accept a single `str`,
+a `list[str]`, or `None`.
+
+---
+
+## `ArrangementRef` and mount paths
+
+Each entry in `accessed_arrangements` / `contributed_to_arrangements` on a
+`TrustedResearchPerformance` is an `ArrangementRef` — a small object that pairs an arrangement
+`@id` with an optional `path` indicating the mount point (the directory that arrangement paths
+are relative to).
+
+```python
+from tro_utils.models import ArrangementRef, TrustedResearchPerformance
+
+perf = TrustedResearchPerformance(
+    performance_id="trp/0",
+    accessed_arrangements=[
+        ArrangementRef(arrangement_id="arrangement/0", path="/mnt/data"),
+        ArrangementRef(arrangement_id="arrangement/1", path="/mnt/reference"),
+    ],
+    contributed_to_arrangements=[
+        ArrangementRef(arrangement_id="arrangement/2"),  # path is optional
+    ],
+)
+```
+
+In JSON-LD, a ref with a path serialises as:
+
+```json
+{
+  "@id": "arrangement/0",
+  "trov:path": "/mnt/data"
+}
+```
+
+A ref without a path serialises as `{ "@id": "arrangement/0" }`, preserving backwards
+compatibility with existing TRO files that contain plain `@id`-only objects.
+
+---
 
 ### `TRO` — high-level facade
 
@@ -82,15 +198,18 @@ tro = TRO(
 # Add an arrangement (scans a directory)
 tro.add_arrangement("/path/to/workdir", comment="Before workflow", ignore=[".git"])
 
+# Or load a pre-computed snapshot (avoids rescanning an expensive directory)
+tro.add_arrangement_from_snapshot("/path/to/dataset.jsonld", comment="Static mount")
+
 # Record a performance
 from datetime import datetime
 tro.add_performance(
-    start=datetime(2024, 3, 1, 9, 22, 1),
-    end=datetime(2024, 3, 2, 10, 0, 11),
+    start_time=datetime(2024, 3, 1, 9, 22, 1),
+    end_time=datetime(2024, 3, 2, 10, 0, 11),
     comment="My workflow run",
-    attributes=["trov:InternetIsolation"],
-    accessed_arrangement_id="arrangement/0",
-    contributed_to_arrangement_id="arrangement/1",
+    attrs=["trov:InternetIsolation"],
+    accessed_arrangement="arrangement/0",   # str, list[str], or None
+    modified_arrangement="arrangement/1",   # str, list[str], or None
 )
 
 # Save, sign, and timestamp
@@ -160,11 +279,31 @@ TransparentResearchObject          tro.py
 ├── ArtifactArrangement[]          arrangement.py
 │   └── ArtifactLocation[]         arrangement.py
 ├── TrustedResearchPerformance[]   performance.py
+│   ├── ArrangementRef[]           performance.py  (accessed_arrangements)
+│   ├── ArrangementRef[]           performance.py  (contributed_to_arrangements)
 │   └── PerformanceAttribute[]     performance.py
 └── TROAttribute[]                 attribute.py
 ```
 
 All model classes inherit from `TROVModel` and implement `to_jsonld()` / `from_jsonld()`.
+
+`ArtifactArrangement` also supports standalone snapshot serialisation:
+
+```python
+from tro_utils.models import ArtifactArrangement, ArtifactComposition
+
+# Compute and persist a snapshot (no TRO needed)
+comp = ArtifactComposition()
+arr = ArtifactArrangement.from_directory(
+    "/mnt/large-dataset", comp, arrangement_id="arrangement/0", comment="Dataset v1.2"
+)
+arr.save_snapshot("dataset-v1.2.jsonld", comp)
+
+# Later — merge the snapshot into any TRO's composition
+tro_model = TransparentResearchObject.load("my.jsonld")
+tro_model.add_arrangement_from_snapshot("dataset-v1.2.jsonld")
+tro_model.save("my.jsonld")
+```
 
 ---
 

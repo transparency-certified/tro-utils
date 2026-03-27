@@ -8,6 +8,8 @@ from rich.console import Console
 from rich.table import Table
 
 from . import TRPAttribute
+from .models.arrangement import ArtifactArrangement
+from .models.composition import ArtifactComposition
 from .tro_utils import TRO
 
 console = Console()
@@ -247,12 +249,50 @@ def info(ctx, verbose):
                 print(f"    - {a['path']} (id={a['@id']})")
 
 
-@arrangement.command(help="Add a directory as a composition to the TRO")
+@arrangement.command(
+    help="Compute an arrangement snapshot from a directory and save it to a file"
+)
 @click.option("--comment", "-m", type=click.STRING, required=False)
 @click.option("--ignore_dir", "-i", type=click.STRING, required=False, multiple=True)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    required=True,
+    help="Output snapshot file (.jsonld)",
+)
 @click.argument("directory", type=click.Path(exists=True))
+def snapshot(directory, ignore_dir, comment, output):
+    composition = ArtifactComposition()
+    arr = ArtifactArrangement.from_directory(
+        directory=directory,
+        composition=composition,
+        arrangement_id="arrangement/0",
+        comment=comment,
+        ignore_dirs=list(ignore_dir) or None,
+    )
+    arr.save_snapshot(output, composition)
+    click.echo(f"Snapshot saved to {output} ({len(arr.locations)} file(s))")
+
+
+@arrangement.command(
+    help="Add an arrangement to the TRO from a directory or a pre-computed snapshot"
+)
+@click.option("--comment", "-m", type=click.STRING, required=False)
+@click.option("--ignore_dir", "-i", type=click.STRING, required=False, multiple=True)
+@click.option(
+    "--from-snapshot",
+    type=click.Path(exists=True),
+    required=False,
+    help="Load arrangement from a pre-computed snapshot file instead of scanning a directory",
+)
+@click.argument("directory", type=click.Path(exists=True), required=False)
 @click.pass_context
-def add(ctx, directory, ignore_dir, comment):
+def add(ctx, directory, ignore_dir, comment, from_snapshot):
+    if from_snapshot is None and directory is None:
+        raise click.UsageError("Provide either DIRECTORY or --from-snapshot.")
+    if from_snapshot is not None and directory is not None:
+        raise click.UsageError("DIRECTORY and --from-snapshot are mutually exclusive.")
     ctx = ctx.parent.parent
     declaration = ctx.params.get("declaration")
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
@@ -270,7 +310,10 @@ def add(ctx, directory, ignore_dir, comment):
         tro_name=tro_name,
         tro_description=tro_description,
     )
-    tro.add_arrangement(directory, ignore_dirs=ignore_dir, comment=comment)
+    if from_snapshot:
+        tro.add_arrangement_from_snapshot(from_snapshot, comment=comment)
+    else:
+        tro.add_arrangement(directory, ignore_dirs=ignore_dir, comment=comment)
     tro.save()
 
 
