@@ -906,60 +906,6 @@ class TestTROUtilityMethods:
         assert "trov:hasArtifact" in composition_info
         assert len(composition_info["trov:hasArtifact"]) > 0
 
-    def test_hash_handling(self, tmp_path, gpg_setup):
-        """Test that hash handling works correctly."""
-        tro = create_tro_with_gpg(
-            filepath=str(tmp_path / "test_tro.jsonld"), gpg_setup=gpg_setup
-        )
-
-        example_hash = (
-            "6591aa920533077fbfa0ffb62d4a2e246b692e0754ca86b86d86824f313325a2"
-        )
-        # Test that providing a hash directly works
-        artifacts = {
-            "trov:sha256": example_hash,
-        }
-        assert tro._get_hash(artifacts)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_dict = {
-            "trov:hash": {
-                "trov:hashAlgorithm": "sha256",
-                "trov:hashValue": example_hash,
-            },
-        }
-        assert tro._get_hash(artifact_with_hash_dict)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_list = {
-            "trov:hash": [
-                {
-                    "trov:hashAlgorithm": "sha512",
-                    "trov:hashValue": "foo",
-                },
-                {
-                    "trov:hashAlgorithm": "sha256",
-                    "trov:hashValue": example_hash,
-                },
-            ]
-        }
-        assert tro._get_hash(artifact_with_hash_list)[len("sha256:") :] == example_hash
-
-        artifact_with_hash_list = {
-            "trov:hash": [
-                {
-                    "trov:hashAlgorithm": "sha512",
-                    "trov:hashValue": "foo",
-                },
-                {
-                    "trov:hashAlgorithm": "md5",
-                    "trov:hashValue": "md5hash",
-                },
-            ]
-        }
-        assert tro._get_hash(artifact_with_hash_list) == "sha512:foo"
-
-        with pytest.raises(ValueError, match="does not contain"):
-            tro._get_hash({})
-
 
 class TestReplicationPackageVerification:
     """Test verification of replication packages against arrangements."""

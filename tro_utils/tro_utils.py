@@ -129,24 +129,6 @@ class TRO:
     def get_arrangement_seq(self):
         return len(self._model.arrangements)
 
-    @staticmethod
-    def _get_hash(artifact):
-        if isinstance(artifact, dict):
-            if "trov:sha256" in artifact:
-                return f"sha256:{artifact['trov:sha256']}"
-            elif "trov:hash" in artifact:
-                _hash = artifact["trov:hash"]
-                if isinstance(_hash, dict):
-                    return f"{_hash['trov:hashAlgorithm']}:{_hash['trov:hashValue']}"
-                elif isinstance(_hash, list):
-                    for h in _hash:
-                        if h.get("trov:hashAlgorithm") == "sha256":
-                            return f"sha256:{h['trov:hashValue']}"
-                    return (
-                        f"{_hash[0]['trov:hashAlgorithm']}:{_hash[0]['trov:hashValue']}"
-                    )
-        raise ValueError(f"Artifact {artifact} does not contain a recognizable hash")
-
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
@@ -336,24 +318,19 @@ class TRO:
 
     def generate_report(self, template, report):
         graph = self.data["@graph"][0]
-        composition = {
-            obj["@id"]: obj for obj in graph["trov:hasComposition"]["trov:hasArtifact"]
-        }
+        artifact_lookup = {a.artifact_id: a for a in self._model.composition.artifacts}
         arrangements = {}
-        for arr in self.data["@graph"][0]["trov:hasArrangement"]:
+        for arr in self._model.arrangements:
             artifacts = {
-                obj["trov:path"]: {
-                    "hash": self._get_hash(composition[obj["trov:artifact"]["@id"]]),
-                    "creator": obj.get("schema:creator", "trs"),
-                    "createdDate": obj.get("schema:createdDate", "None"),
+                loc.path: {
+                    "hash": artifact_lookup[loc.artifact_id].hash.to_string(),
+                    "creator": "trs",
+                    "createdDate": "None",
                 }
-                for obj in sorted(
-                    arr["trov:hasArtifactLocation"], key=lambda x: x["trov:path"]
-                )
+                for loc in sorted(arr.locations, key=lambda l: l.path)
             }
-
-            arrangements[arr["@id"]] = {
-                "name": arr["rdfs:comment"],
+            arrangements[arr.arrangement_id] = {
+                "name": arr.comment,
                 "artifacts": artifacts,
             }
 
@@ -363,22 +340,16 @@ class TRO:
         dot.graph_attr["dpi"] = "200"
 
         dot.attr("node", shape="box", style="filled, rounded", fillcolor="#FFFFD1")
-        for arrangement in arrangements:
-            dot.node(arrangements[arrangement]["name"])
+        for arr_id in arrangements:
+            dot.node(arrangements[arr_id]["name"])
 
         dot.attr("node", shape="box3d", style="filled, rounded", fillcolor="#D6FDD0")
-
-        if isinstance(graph["trov:hasPerformance"], dict):
-            graph["trov:hasPerformance"] = [graph["trov:hasPerformance"]]
-        for trp in graph["trov:hasPerformance"]:
-            description = trp["rdfs:comment"]
-            accessed = arrangements[trp["trov:accessedArrangement"]["@id"]]["name"]
-            contributed = arrangements[trp["trov:contributedToArrangement"]["@id"]][
-                "name"
-            ]
-            dot.node(description)
-            dot.edge(accessed, description)
-            dot.edge(description, contributed)
+        for perf in self._model.performances:
+            dot.node(perf.comment)
+            dot.edge(arrangements[perf.accessed_arrangement_id]["name"], perf.comment)
+            dot.edge(
+                perf.comment, arrangements[perf.contributed_to_arrangement_id]["name"]
+            )
 
         png_bytes = dot.pipe(format="png")
         png_base64 = base64.b64encode(png_bytes).decode("utf-8")
@@ -407,18 +378,16 @@ class TRO:
             "workflow_diagram": png_base64,
             "trps": [
                 {
-                    "id": trp["@id"],
-                    "started": trp["trov:startedAtTime"],
-                    "ended": trp["trov:endedAtTime"],
-                    "accessed": arrangements[
-                        trp.get("trov:accessedArrangement", {"@id": ""})["@id"]
-                    ]["name"],
-                    "contributed": arrangements[
-                        trp.get("trov:contributedToArrangement", {"@id": ""})["@id"]
-                    ]["name"],
-                    "description": trp.get("rdfs:comment", ""),
+                    "id": perf.performance_id,
+                    "started": perf.started_at.isoformat() if perf.started_at else None,
+                    "ended": perf.ended_at.isoformat() if perf.ended_at else None,
+                    "accessed": arrangements[perf.accessed_arrangement_id]["name"],
+                    "contributed": arrangements[perf.contributed_to_arrangement_id][
+                        "name"
+                    ],
+                    "description": perf.comment,
                 }
-                for trp in graph["trov:hasPerformance"]
+                for perf in self._model.performances
             ],
             "arrangements": arrangements,
         }

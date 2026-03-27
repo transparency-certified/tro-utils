@@ -229,25 +229,21 @@ def info(ctx, verbose):
     tro = TRO(
         filepath=declaration,
     )
+    artifact_locs: dict = {}
     if verbose:
-        data = {}
-        for a in tro.list_arrangements():
-            for c in a["trov:hasArtifactLocation"]:
-                key = c["trov:artifact"]["@id"]
-                value = {"@id": c["@id"], "path": c["trov:path"]}
-                if key not in data:
-                    data[key] = [value]
-                else:
-                    data[key].append(value)
+        for arr in tro._model.arrangements:
+            for loc in arr.locations:
+                artifact_locs.setdefault(loc.artifact_id, []).append(
+                    {"@id": loc.location_id, "path": loc.path}
+                )
 
-    for c in tro.get_composition_info()["trov:hasArtifact"]:
-        trov_hash = TRO._get_hash(c)
-        print(c["@id"])
-        print(f"  - mimeType: {c['trov:mimeType']}")
-        print(f"  - {trov_hash}")
+    for artifact in tro._model.composition.artifacts:
+        print(artifact.artifact_id)
+        print(f"  - mimeType: {artifact.mime_type}")
+        print(f"  - {artifact.hash}")
         if verbose:
             print("  - Arrangements:")
-            for a in data.get(c["@id"], []):
+            for a in artifact_locs.get(artifact.artifact_id, []):
                 print(f"    - {a['path']} (id={a['@id']})")
 
 
