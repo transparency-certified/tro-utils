@@ -18,7 +18,11 @@ from ._base import TROVModel
 from .arrangement import ArtifactArrangement
 from .attribute import TROAttribute
 from .composition import ArtifactComposition
-from .performance import PerformanceAttribute, TrustedResearchPerformance
+from .performance import (
+    ArrangementRef,
+    PerformanceAttribute,
+    TrustedResearchPerformance,
+)
 from .trs import TrustedResearchSystem
 from .tsa import TimeStampingAuthority
 
@@ -122,8 +126,8 @@ class TransparentResearchObject(TROVModel):
         start_time: datetime.datetime,
         end_time: datetime.datetime,
         comment: str | None = None,
-        accessed_arrangement: str | None = None,
-        modified_arrangement: str | None = None,
+        accessed_arrangement: str | list[str] | None = None,
+        modified_arrangement: str | list[str] | None = None,
         attrs: list | None = None,
         extra_attributes: dict[str, Any] | None = None,
     ) -> TrustedResearchPerformance:
@@ -135,8 +139,10 @@ class TransparentResearchObject(TROVModel):
             start_time: When execution started.
             end_time: When execution ended.
             comment: Human-readable description.
-            accessed_arrangement: ``@id`` of the input arrangement.
-            modified_arrangement: ``@id`` of the output arrangement.
+            accessed_arrangement: ``@id`` (or list of ``@id``\\s) of the input
+                arrangement(s).
+            modified_arrangement: ``@id`` (or list of ``@id``\\s) of the output
+                arrangement(s).
             attrs: List of :class:`~tro_utils.TRPAttribute` members (or their
                 string values) to record as performance attributes.
             extra_attributes: Additional raw key/value pairs to merge into the
@@ -159,18 +165,36 @@ class TransparentResearchObject(TROVModel):
         if extra_attributes is None:
             extra_attributes = {}
 
+        # Normalise str | list[str] | None → list[str]
+        accessed_ids: list[str] = (
+            [accessed_arrangement]
+            if isinstance(accessed_arrangement, str)
+            else list(accessed_arrangement)
+            if accessed_arrangement
+            else []
+        )
+        modified_ids: list[str] = (
+            [modified_arrangement]
+            if isinstance(modified_arrangement, str)
+            else list(modified_arrangement)
+            if modified_arrangement
+            else []
+        )
+
         available_ids = {arr.arrangement_id for arr in self.arrangements}
 
-        if accessed_arrangement and accessed_arrangement not in available_ids:
-            raise ValueError(
-                f"Arrangement {accessed_arrangement!r} does not exist. "
-                f"Available: {sorted(available_ids)}"
-            )
-        if modified_arrangement and modified_arrangement not in available_ids:
-            raise ValueError(
-                f"Arrangement {modified_arrangement!r} does not exist. "
-                f"Available: {sorted(available_ids)}"
-            )
+        for arr_id in accessed_ids:
+            if arr_id not in available_ids:
+                raise ValueError(
+                    f"Arrangement {arr_id!r} does not exist. "
+                    f"Available: {sorted(available_ids)}"
+                )
+        for arr_id in modified_ids:
+            if arr_id not in available_ids:
+                raise ValueError(
+                    f"Arrangement {arr_id!r} does not exist. "
+                    f"Available: {sorted(available_ids)}"
+                )
 
         trs_caps = {
             cap.capability_type: cap.capability_id for cap in self.trs.capabilities
@@ -201,8 +225,12 @@ class TransparentResearchObject(TROVModel):
             conducted_by_id=self.trs.trs_id,
             started_at=start_time,
             ended_at=end_time,
-            accessed_arrangement_id=accessed_arrangement,
-            contributed_to_arrangement_id=modified_arrangement,
+            accessed_arrangements=[
+                ArrangementRef(arrangement_id=arr_id) for arr_id in accessed_ids
+            ],
+            contributed_to_arrangements=[
+                ArrangementRef(arrangement_id=arr_id) for arr_id in modified_ids
+            ],
             attributes=performance_attributes,
         )
 

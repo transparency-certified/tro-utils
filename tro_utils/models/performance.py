@@ -10,6 +10,36 @@ from ._base import TROVModel
 
 
 @dataclass
+class ArrangementRef(TROVModel):
+    """A reference to an :class:`~tro_utils.models.arrangement.ArtifactArrangement`.
+
+    Used by :class:`TrustedResearchPerformance` to record which arrangements
+    were accessed or contributed to.  ``path`` indicates the mount / working
+    directory that arrangement paths are relative to.
+    """
+
+    arrangement_id: str
+    path: str | None = None
+
+    # ------------------------------------------------------------------
+    # JSON-LD serialisation
+    # ------------------------------------------------------------------
+
+    def to_jsonld(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"@id": self.arrangement_id}
+        if self.path is not None:
+            result["trov:path"] = self.path
+        return result
+
+    @classmethod
+    def from_jsonld(cls, data: dict[str, Any]) -> "ArrangementRef":
+        return cls(
+            arrangement_id=data["@id"],
+            path=data.get("trov:path"),
+        )
+
+
+@dataclass
 class PerformanceAttribute(TROVModel):
     """A single attribute of a :class:`TrustedResearchPerformance`.
 
@@ -49,8 +79,8 @@ class TrustedResearchPerformance(TROVModel):
     conducted_by_id: str = "trs"
     started_at: datetime.datetime | None = None
     ended_at: datetime.datetime | None = None
-    accessed_arrangement_id: str | None = None
-    contributed_to_arrangement_id: str | None = None
+    accessed_arrangements: list[ArrangementRef] = field(default_factory=list)
+    contributed_to_arrangements: list[ArrangementRef] = field(default_factory=list)
     attributes: list[PerformanceAttribute] = field(default_factory=list)
 
     # ------------------------------------------------------------------
@@ -71,12 +101,22 @@ class TrustedResearchPerformance(TROVModel):
             result["trov:startedAtTime"] = self.started_at.isoformat()
         if self.ended_at is not None:
             result["trov:endedAtTime"] = self.ended_at.isoformat()
-        if self.accessed_arrangement_id is not None:
-            result["trov:accessedArrangement"] = {"@id": self.accessed_arrangement_id}
-        if self.contributed_to_arrangement_id is not None:
-            result["trov:contributedToArrangement"] = {
-                "@id": self.contributed_to_arrangement_id
-            }
+        if len(self.accessed_arrangements) == 1:
+            result["trov:accessedArrangement"] = self.accessed_arrangements[
+                0
+            ].to_jsonld()
+        elif len(self.accessed_arrangements) > 1:
+            result["trov:accessedArrangement"] = [
+                ref.to_jsonld() for ref in self.accessed_arrangements
+            ]
+        if len(self.contributed_to_arrangements) == 1:
+            result["trov:contributedToArrangement"] = self.contributed_to_arrangements[
+                0
+            ].to_jsonld()
+        elif len(self.contributed_to_arrangements) > 1:
+            result["trov:contributedToArrangement"] = [
+                ref.to_jsonld() for ref in self.contributed_to_arrangements
+            ]
         return result
 
     @classmethod
@@ -100,8 +140,12 @@ class TrustedResearchPerformance(TROVModel):
             for attr in data.get("trov:hasPerformanceAttribute", [])
         ]
 
-        accessed = data.get("trov:accessedArrangement")
-        contributed = data.get("trov:contributedToArrangement")
+        def _parse_refs(value: Any) -> list[ArrangementRef]:
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return [ArrangementRef.from_jsonld(item) for item in value]
+            return [ArrangementRef.from_jsonld(value)]
 
         return cls(
             performance_id=data["@id"],
@@ -109,7 +153,9 @@ class TrustedResearchPerformance(TROVModel):
             conducted_by_id=data.get("trov:wasConductedBy", {}).get("@id", "trs"),
             started_at=_parse_dt(data.get("trov:startedAtTime")),
             ended_at=_parse_dt(data.get("trov:endedAtTime")),
-            accessed_arrangement_id=accessed["@id"] if accessed else None,
-            contributed_to_arrangement_id=contributed["@id"] if contributed else None,
+            accessed_arrangements=_parse_refs(data.get("trov:accessedArrangement")),
+            contributed_to_arrangements=_parse_refs(
+                data.get("trov:contributedToArrangement")
+            ),
             attributes=attributes,
         )

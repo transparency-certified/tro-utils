@@ -16,6 +16,7 @@ from tro_utils.models import (
     ArtifactArrangement,
     ArtifactComposition,
     ArtifactLocation,
+    ArrangementRef,
     CompositionFingerprint,
     HashValue,
     PerformanceAttribute,
@@ -1685,8 +1686,8 @@ class TestTrustedResearchPerformance:
             conducted_by_id="trs",
             started_at=datetime.datetime(2024, 1, 1, 10, 0, 0),
             ended_at=datetime.datetime(2024, 1, 1, 11, 0, 0),
-            accessed_arrangement_id="arrangement/0",
-            contributed_to_arrangement_id="arrangement/1",
+            accessed_arrangements=[ArrangementRef("arrangement/0", path="/workdir")],
+            contributed_to_arrangements=[ArrangementRef("arrangement/1")],
             attributes=[
                 PerformanceAttribute(
                     "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"
@@ -1699,10 +1700,8 @@ class TestTrustedResearchPerformance:
         assert restored.comment == trp.comment
         assert restored.started_at == trp.started_at
         assert restored.ended_at == trp.ended_at
-        assert restored.accessed_arrangement_id == trp.accessed_arrangement_id
-        assert (
-            restored.contributed_to_arrangement_id == trp.contributed_to_arrangement_id
-        )
+        assert restored.accessed_arrangements == trp.accessed_arrangements
+        assert restored.contributed_to_arrangements == trp.contributed_to_arrangements
         assert len(restored.attributes) == 1
 
     def test_optional_fields_absent_when_none(self):

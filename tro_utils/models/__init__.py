@@ -7,7 +7,11 @@ from .arrangement import ArtifactArrangement, ArtifactLocation
 from .trs import TrustedResearchSystem, TRSCapability
 from .tsa import TimeStampingAuthority
 from .attribute import TROAttribute
-from .performance import TrustedResearchPerformance, PerformanceAttribute
+from .performance import (
+    TrustedResearchPerformance,
+    PerformanceAttribute,
+    ArrangementRef,
+)
 from .tro import TransparentResearchObject
 
 __all__ = [
@@ -23,5 +27,6 @@ __all__ = [
     "TROAttribute",
     "TrustedResearchPerformance",
     "PerformanceAttribute",
+    "ArrangementRef",
     "TransparentResearchObject",
 ]

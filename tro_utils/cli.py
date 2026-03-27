@@ -358,10 +358,20 @@ def generate_report(ctx, template, output):
     help="Capabilities of the performance",
 )
 @click.option(
-    "--accessed", "-A", type=click.STRING, required=False, help="Accessed Arrangement"
+    "--accessed",
+    "-A",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Accessed arrangement (may be repeated for multiple arrangements)",
 )
 @click.option(
-    "--modified", "-M", type=click.STRING, required=False, help="Modified Arrangement"
+    "--modified",
+    "-M",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Modified arrangement (may be repeated for multiple arrangements)",
 )
 @click.pass_context
 def performance_add(ctx, comment, start, end, attribute, accessed, modified):
@@ -380,8 +390,8 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
         start,
         end,
         comment=comment,
-        accessed_arrangement=accessed,
-        modified_arrangement=modified,
+        accessed_arrangement=list(accessed) or None,
+        modified_arrangement=list(modified) or None,
         attrs=attribute,
     )
     tro.save()

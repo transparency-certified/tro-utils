@@ -297,8 +297,8 @@ class TRO:
         start_time,
         end_time,
         comment=None,
-        accessed_arrangement=None,
-        modified_arrangement=None,
+        accessed_arrangement=None,  # str | list[str] | None
+        modified_arrangement=None,  # str | list[str] | None
         attrs=None,
         extra_attributes=None,
     ):
@@ -346,10 +346,10 @@ class TRO:
         dot.attr("node", shape="box3d", style="filled, rounded", fillcolor="#D6FDD0")
         for perf in self._model.performances:
             dot.node(perf.comment)
-            dot.edge(arrangements[perf.accessed_arrangement_id]["name"], perf.comment)
-            dot.edge(
-                perf.comment, arrangements[perf.contributed_to_arrangement_id]["name"]
-            )
+            for ref in perf.accessed_arrangements:
+                dot.edge(arrangements[ref.arrangement_id]["name"], perf.comment)
+            for ref in perf.contributed_to_arrangements:
+                dot.edge(perf.comment, arrangements[ref.arrangement_id]["name"])
 
         png_bytes = dot.pipe(format="png")
         png_base64 = base64.b64encode(png_bytes).decode("utf-8")
@@ -381,9 +381,13 @@ class TRO:
                     "id": perf.performance_id,
                     "started": perf.started_at.isoformat() if perf.started_at else None,
                     "ended": perf.ended_at.isoformat() if perf.ended_at else None,
-                    "accessed": arrangements[perf.accessed_arrangement_id]["name"],
-                    "contributed": arrangements[perf.contributed_to_arrangement_id][
-                        "name"
+                    "accessed": [
+                        arrangements[ref.arrangement_id]["name"]
+                        for ref in perf.accessed_arrangements
+                    ],
+                    "contributed": [
+                        arrangements[ref.arrangement_id]["name"]
+                        for ref in perf.contributed_to_arrangements
                     ],
                     "description": perf.comment,
                 }
