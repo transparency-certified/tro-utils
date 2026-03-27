@@ -546,6 +546,75 @@ class TestTROPerformances:
                 attrs=[],
             )
 
+    def test_add_performance_arrangement_ref_with_path(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """ArrangementRef objects with path are accepted and serialise trov:path."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="with path",
+            accessed_arrangement=ArrangementRef("arrangement/0", path="/mnt/data"),
+            modified_arrangement="arrangement/1",
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert accessed["@id"] == "arrangement/0"
+        assert accessed["trov:path"] == "/mnt/data"
+        # contributed has no path
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["@id"] == "arrangement/1"
+        assert "trov:path" not in contributed
+
+    def test_add_performance_mixed_strings_and_refs(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """A mixed list of str and ArrangementRef is accepted; paths serialised where set."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "out.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+        (temp_workspace / "out2.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="C")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="mixed",
+            accessed_arrangement=[
+                ArrangementRef("arrangement/0", path="/mnt/input"),
+                "arrangement/1",
+            ],
+            modified_arrangement=ArrangementRef("arrangement/2", path="/mnt/output"),
+            attrs=[],
+        )
+
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        accessed = perf["trov:accessedArrangement"]
+        assert isinstance(accessed, list)
+        assert len(accessed) == 2
+        by_id = {r["@id"]: r for r in accessed}
+        assert by_id["arrangement/0"]["trov:path"] == "/mnt/input"
+        assert "trov:path" not in by_id["arrangement/1"]
+        contributed = perf["trov:contributedToArrangement"]
+        assert contributed["@id"] == "arrangement/2"
+        assert contributed["trov:path"] == "/mnt/output"
+
 
 class TestTROSigning:
     """Test TRO signing and verification."""

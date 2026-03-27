@@ -27,10 +27,6 @@ class ArtifactLocation(TROVModel):
     artifact_id: str
     path: str
 
-    # ------------------------------------------------------------------
-    # JSON-LD serialisation
-    # ------------------------------------------------------------------
-
     def to_jsonld(self) -> dict[str, Any]:
         return {
             "@id": self.location_id,
@@ -73,7 +69,6 @@ class ArtifactArrangement(TROVModel):
         """Scan *directory* and create an arrangement, updating *composition* in place.
 
         New files are added to *composition*; existing files (by hash) are reused.
-        This mirrors the logic in ``TRO.add_arrangement``.
 
         Args:
             directory: Root directory to scan.
@@ -172,7 +167,7 @@ class ArtifactArrangement(TROVModel):
             composition: The composition that owns the artifacts referenced here.
 
         Returns:
-            Dict mapping relative file path → hash string.
+            Dict mapping relative file path to hash string.
         """
         result: dict[str, str] = {}
         for location in self.locations:
@@ -282,14 +277,14 @@ class ArtifactArrangement(TROVModel):
         """
         from .artifact import ResearchArtifact
 
-        # Build a local lookup: snapshot-local artifact @id → ResearchArtifact
+        # Build a local lookup: snapshot-local artifact @id to ResearchArtifact
         snap_artifacts: dict[str, ResearchArtifact] = {
             art_data["@id"]: ResearchArtifact.from_jsonld(art_data)
             for art_data in data.get("trov:hasArtifact", [])
         }
 
         # Merge each snapshot artifact into the target composition, tracking IDs
-        id_remap: dict[str, str] = {}  # snapshot_id → target composition id
+        id_remap: dict[str, str] = {}  # snapshot_id to target composition id
         for snap_id, artifact in snap_artifacts.items():
             hash_str = artifact.hash.to_string()
             existing = target_composition.get_by_hash(hash_str)

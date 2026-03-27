@@ -154,8 +154,8 @@ class TransparentResearchObject(TROVModel):
         start_time: datetime.datetime,
         end_time: datetime.datetime,
         comment: str | None = None,
-        accessed_arrangement: str | list[str] | None = None,
-        modified_arrangement: str | list[str] | None = None,
+        accessed_arrangement: "str | ArrangementRef | list[str | ArrangementRef] | None" = None,
+        modified_arrangement: "str | ArrangementRef | list[str | ArrangementRef] | None" = None,
         attrs: list | None = None,
         extra_attributes: dict[str, Any] | None = None,
     ) -> TrustedResearchPerformance:
@@ -167,10 +167,12 @@ class TransparentResearchObject(TROVModel):
             start_time: When execution started.
             end_time: When execution ended.
             comment: Human-readable description.
-            accessed_arrangement: ``@id`` (or list of ``@id``\\s) of the input
-                arrangement(s).
-            modified_arrangement: ``@id`` (or list of ``@id``\\s) of the output
-                arrangement(s).
+            accessed_arrangement: Input arrangement(s).  Each item may be a
+                bare ``@id`` string or an :class:`ArrangementRef` (which also
+                carries an optional ``path`` mount point).  A single value or
+                a list is accepted.
+            modified_arrangement: Output arrangement(s).  Same flexible input
+                as *accessed_arrangement*.
             attrs: List of :class:`~tro_utils.TRPAttribute` members (or their
                 string values) to record as performance attributes.
             extra_attributes: Additional raw key/value pairs to merge into the
@@ -193,34 +195,34 @@ class TransparentResearchObject(TROVModel):
         if extra_attributes is None:
             extra_attributes = {}
 
-        # Normalise str | list[str] | None → list[str]
-        accessed_ids: list[str] = (
-            [accessed_arrangement]
-            if isinstance(accessed_arrangement, str)
-            else list(accessed_arrangement)
-            if accessed_arrangement
-            else []
-        )
-        modified_ids: list[str] = (
-            [modified_arrangement]
-            if isinstance(modified_arrangement, str)
-            else list(modified_arrangement)
-            if modified_arrangement
-            else []
-        )
+        def _normalise(value: Any) -> list[ArrangementRef]:
+            """Accept str | ArrangementRef | list[str | ArrangementRef] | None."""
+            if value is None:
+                return []
+            if isinstance(value, (str, ArrangementRef)):
+                value = [value]
+            return [
+                item
+                if isinstance(item, ArrangementRef)
+                else ArrangementRef(arrangement_id=item)
+                for item in value
+            ]
+
+        accessed_refs = _normalise(accessed_arrangement)
+        modified_refs = _normalise(modified_arrangement)
 
         available_ids = {arr.arrangement_id for arr in self.arrangements}
 
-        for arr_id in accessed_ids:
-            if arr_id not in available_ids:
+        for ref in accessed_refs:
+            if ref.arrangement_id not in available_ids:
                 raise ValueError(
-                    f"Arrangement {arr_id!r} does not exist. "
+                    f"Arrangement {ref.arrangement_id!r} does not exist. "
                     f"Available: {sorted(available_ids)}"
                 )
-        for arr_id in modified_ids:
-            if arr_id not in available_ids:
+        for ref in modified_refs:
+            if ref.arrangement_id not in available_ids:
                 raise ValueError(
-                    f"Arrangement {arr_id!r} does not exist. "
+                    f"Arrangement {ref.arrangement_id!r} does not exist. "
                     f"Available: {sorted(available_ids)}"
                 )
 
@@ -253,12 +255,8 @@ class TransparentResearchObject(TROVModel):
             conducted_by_id=self.trs.trs_id,
             started_at=start_time,
             ended_at=end_time,
-            accessed_arrangements=[
-                ArrangementRef(arrangement_id=arr_id) for arr_id in accessed_ids
-            ],
-            contributed_to_arrangements=[
-                ArrangementRef(arrangement_id=arr_id) for arr_id in modified_ids
-            ],
+            accessed_arrangements=accessed_refs,
+            contributed_to_arrangements=modified_refs,
             attributes=performance_attributes,
         )
 

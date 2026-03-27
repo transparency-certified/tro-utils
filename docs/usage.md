@@ -147,6 +147,45 @@ Each entry in `accessed_arrangements` / `contributed_to_arrangements` on a
 `@id` with an optional `path` indicating the mount point (the directory that arrangement paths
 are relative to).
 
+### CLI — `ARRANGEMENT_ID:MOUNT_PATH` syntax
+
+Supply a mount path by separating the arrangement ID and path with `:`:
+
+```bash
+tro-utils --declaration my.jsonld performance add \
+  --start 2024-01-01T10:00:00 \
+  --end   2024-01-01T11:00:00 \
+  -A arrangement/0:/mnt/input \
+  -A arrangement/1 \
+  -M arrangement/2:/mnt/output
+```
+
+Entries without a `:` are plain arrangement IDs (no mount path recorded). The two forms
+can be mixed freely in a single command.
+
+### Python API
+
+Pass `ArrangementRef` objects directly to `add_performance`:
+
+```python
+from tro_utils.models import ArrangementRef
+
+tro.add_performance(
+    start_time=start,
+    end_time=end,
+    comment="Containerised run",
+    # Mix ArrangementRef objects and plain strings freely
+    accessed_arrangement=[
+        ArrangementRef("arrangement/0", path="/mnt/input"),
+        "arrangement/1",                                   # path omitted
+    ],
+    modified_arrangement=ArrangementRef("arrangement/2", path="/mnt/output"),
+    attrs=[TRPAttribute.NET_ISOLATION],
+)
+```
+
+You can also construct `ArrangementRef` objects directly when building a model:
+
 ```python
 from tro_utils.models import ArrangementRef, TrustedResearchPerformance
 

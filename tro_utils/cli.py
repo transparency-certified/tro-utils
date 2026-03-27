@@ -10,9 +10,17 @@ from rich.table import Table
 from . import TRPAttribute
 from .models.arrangement import ArtifactArrangement
 from .models.composition import ArtifactComposition
+from .models.performance import ArrangementRef
 from .tro_utils import TRO
 
 console = Console()
+
+
+def _parse_arrangement_ref(value: str) -> ArrangementRef:
+    """Parse ``ARRANGEMENT_ID`` or ``ARRANGEMENT_ID:MOUNT_PATH`` into an :class:`ArrangementRef`."""
+    arrangement_id, _, path = value.partition(":")
+    return ArrangementRef(arrangement_id=arrangement_id, path=path or None)
+
 
 _TEMPLATES = {
     "default": {
@@ -406,7 +414,7 @@ def generate_report(ctx, template, output):
     type=click.STRING,
     required=False,
     multiple=True,
-    help="Accessed arrangement (may be repeated for multiple arrangements)",
+    help="Accessed arrangement: ARRANGEMENT_ID or ARRANGEMENT_ID:MOUNT_PATH. May be repeated.",
 )
 @click.option(
     "--modified",
@@ -414,7 +422,7 @@ def generate_report(ctx, template, output):
     type=click.STRING,
     required=False,
     multiple=True,
-    help="Modified arrangement (may be repeated for multiple arrangements)",
+    help="Modified arrangement: ARRANGEMENT_ID or ARRANGEMENT_ID:MOUNT_PATH. May be repeated.",
 )
 @click.pass_context
 def performance_add(ctx, comment, start, end, attribute, accessed, modified):
@@ -433,8 +441,8 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
         start,
         end,
         comment=comment,
-        accessed_arrangement=list(accessed) or None,
-        modified_arrangement=list(modified) or None,
+        accessed_arrangement=[_parse_arrangement_ref(v) for v in accessed] or None,
+        modified_arrangement=[_parse_arrangement_ref(v) for v in modified] or None,
         attrs=attribute,
     )
     tro.save()
