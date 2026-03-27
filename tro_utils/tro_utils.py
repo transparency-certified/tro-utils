@@ -22,6 +22,7 @@ import rfc3161ng
 import graphviz
 from pyasn1.codec.der import encoder
 
+from . import __version__
 from .models import TransparentResearchObject
 from .models.trs import TrustedResearchSystem
 
@@ -73,6 +74,8 @@ class TRO:
                 name=tro_name or "Some TRO",
                 description=tro_description or "Some description",
                 trs=trs,
+                created_with_name="tro-utils",
+                created_with_version=__version__,
             )
         else:
             self._model = TransparentResearchObject.load(self.tro_filename)
