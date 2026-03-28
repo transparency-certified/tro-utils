@@ -21,6 +21,24 @@ def _parse_arrangement_ref(value: str) -> tuple[str, str | None]:
     return (arrangement_id, path or None)
 
 
+def _parse_extra_context_value(ctx, param, value):
+    """Parse ``--extra-context`` values into JSON-LD context dicts.
+
+    Each value must be in ``PREFIX=URI`` form (e.g. ``ex=http://example.org/``).
+    """
+    result = []
+    for v in value:
+        if "=" not in v:
+            raise click.BadParameter(
+                f"{v!r} is not a valid PREFIX=URI mapping.",
+                param=param,
+                ctx=ctx,
+            )
+        prefix, _, uri = v.partition("=")
+        result.append({prefix: uri})
+    return result
+
+
 _TEMPLATES = {
     "default": {
         "description": "Default pretty template by Craig Willis",
@@ -104,6 +122,20 @@ class StringOrPath(click.ParamType):
     required=False,
     help="TRO description (only used when creating a new TRO)",
 )
+@click.option(
+    "--extra-context",
+    "-c",
+    envvar="TRO_EXTRA_CONTEXT",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    callback=_parse_extra_context_value,
+    is_eager=False,
+    help=(
+        "Extra PREFIX=URI vocabulary mapping to append to @context "
+        "(e.g. ex=http://example.org/).  May be repeated."
+    ),
+)
 def cli(
     declaration,
     profile,
@@ -112,6 +144,7 @@ def cli(
     tro_creator,
     tro_name,
     tro_description,
+    extra_context,
 ):
     pass
 
@@ -308,6 +341,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
     tro_name = ctx.params.get("tro_name")
     tro_description = ctx.params.get("tro_description")
     tro_creator = ctx.params.get("tro_creator")
+    extra_context = ctx.params.get("extra_context") or []
     tro = TRO(
         filepath=declaration,
         gpg_fingerprint=gpg_fingerprint,
@@ -316,6 +350,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
         tro_creator=tro_creator,
         tro_name=tro_name,
         tro_description=tro_description,
+        extra_context=extra_context or None,
     )
     if from_snapshot:
         tro.add_arrangement_from_snapshot(from_snapshot, comment=comment)
@@ -430,11 +465,13 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
     gpg_fingerprint = ctx.params.get("gpg_fingerprint")
     gpg_passphrase = ctx.params.get("gpg_passphrase")
     profile = ctx.params.get("profile")
+    extra_context = ctx.params.get("extra_context") or []
     tro = TRO(
         filepath=declaration,
         gpg_fingerprint=gpg_fingerprint,
         gpg_passphrase=gpg_passphrase,
         profile=profile,
+        extra_context=extra_context or None,
     )
     tro.add_performance(
         start,
