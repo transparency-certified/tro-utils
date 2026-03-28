@@ -280,10 +280,8 @@ class TransparentResearchObject(TROVModel):
             attributes=performance_attributes,
         )
 
-        # Merge extra_attributes as raw fields — stored as a side-channel dict
-        # via the JSON-LD round-trip (no typed model needed for forward compat)
         if extra_attributes:
-            trp._extra_attributes = extra_attributes  # type: ignore[attr-defined]
+            trp.extra_attributes = extra_attributes
 
         self.performances.append(trp)
         return trp
