@@ -661,3 +661,111 @@ class TestCLIPerformance:
         by_id = {r["trov:arrangement"]["@id"]: r for r in accessed}
         assert by_id["arrangement/0"]["trov:boundTo"] == "/mnt/a"
         assert "trov:boundTo" not in by_id["arrangement/1"]
+
+
+class TestExtraContextCLI:
+    """Tests for --extra-context CLI option."""
+
+    def test_extra_context_prefix_mapping(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """--extra-context PREFIX=URI adds a prefix mapping dict to @context."""
+        tro_file = tmp_path / "tro.jsonld"
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "--extra-context",
+                "ex=http://example.org/",
+                "arrangement",
+                "add",
+                "--comment",
+                "test",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            data = json.load(f)
+        assert {"ex": "http://example.org/"} in data["@context"]
+
+    def test_extra_context_multiple(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """Multiple --extra-context PREFIX=URI flags all appear in @context."""
+        tro_file = tmp_path / "tro.jsonld"
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "--extra-context",
+                "ex=http://example.org/",
+                "--extra-context",
+                "foaf=http://xmlns.com/foaf/0.1/",
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            data = json.load(f)
+        assert {"ex": "http://example.org/"} in data["@context"]
+        assert {"foaf": "http://xmlns.com/foaf/0.1/"} in data["@context"]
+
+    def test_extra_context_invalid_format(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """--extra-context value that is not PREFIX=URI produces an error."""
+        tro_file = tmp_path / "tro.jsonld"
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "--extra-context",
+                "https://example.org/vocab.jsonld",
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code != 0
+
+    def test_extra_context_base_context_preserved(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """The standard base @context entry is always present even with extra context."""
+        tro_file = tmp_path / "tro.jsonld"
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "--extra-context",
+                "ex=http://example.org/",
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        with open(tro_file) as f:
+            data = json.load(f)
+        base = data["@context"][0]
+        assert "trov" in base
+
+    def test_cli_help_shows_extra_context(self, runner):
+        """--extra-context option is visible in CLI help output."""
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "extra-context" in result.output

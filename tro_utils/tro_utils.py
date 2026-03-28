@@ -44,6 +44,7 @@ class TRO:
         tro_creator=None,
         tro_name=None,
         tro_description=None,
+        extra_context=None,
     ):
         if filepath is None:
             self.basename = "some_tro"
@@ -79,6 +80,9 @@ class TRO:
             )
         else:
             self._model = TransparentResearchObject.load(self.tro_filename)
+
+        if extra_context:
+            self._model.extra_context.extend(extra_context)
 
         self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
         if gpg_fingerprint:
