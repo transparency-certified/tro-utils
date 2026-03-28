@@ -92,6 +92,7 @@ class TrustedResearchPerformance(TROVModel):
     accessed_arrangements: list[ArrangementBinding] = field(default_factory=list)
     contributed_to_arrangements: list[ArrangementBinding] = field(default_factory=list)
     attributes: list[PerformanceAttribute] = field(default_factory=list)
+    extra_attributes: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # JSON-LD serialisation
@@ -127,6 +128,8 @@ class TrustedResearchPerformance(TROVModel):
             result["trov:contributedToArrangement"] = [
                 ref.to_jsonld() for ref in self.contributed_to_arrangements
             ]
+        if self.extra_attributes:
+            result.update(self.extra_attributes)
         return result
 
     @classmethod
@@ -157,6 +160,19 @@ class TrustedResearchPerformance(TROVModel):
                 return [ArrangementBinding.from_jsonld(item) for item in value]
             return [ArrangementBinding.from_jsonld(value)]
 
+        known_keys = {
+            "@id",
+            "@type",
+            "rdfs:comment",
+            "trov:wasConductedBy",
+            "trov:hasPerformanceAttribute",
+            "trov:startedAtTime",
+            "trov:endedAtTime",
+            "trov:accessedArrangement",
+            "trov:contributedToArrangement",
+        }
+        extra = {k: v for k, v in data.items() if k not in known_keys}
+
         return cls(
             performance_id=data["@id"],
             comment=data.get("rdfs:comment", ""),
@@ -168,4 +184,5 @@ class TrustedResearchPerformance(TROVModel):
                 data.get("trov:contributedToArrangement")
             ),
             attributes=attributes,
+            extra_attributes=extra,
         )

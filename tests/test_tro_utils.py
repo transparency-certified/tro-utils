@@ -620,6 +620,40 @@ class TestTROPerformances:
         assert contributed["trov:arrangement"]["@id"] == "arrangement/2"
         assert contributed["trov:boundTo"] == "/mnt/output"
 
+    def test_add_performance_extra_attrs(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """Test that extra attributes passed to add_performance are included in the performance."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        (temp_workspace / "input.txt").write_text("x")
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "output.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="with attrs",
+            accessed_arrangement="arrangement/0",
+            modified_arrangement="arrangement/1",
+            extra_attributes={"trov:customAttr": "customValue"},
+        )
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        assert perf["trov:customAttr"] == "customValue"
+
+        tro.save()
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        assert perf["trov:customAttr"] == "customValue"
+
 
 class TestTROSigning:
     """Test TRO signing and verification."""
