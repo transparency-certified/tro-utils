@@ -1,4 +1,10 @@
+example/
+*.jsonld
+*.sig
+*.tsr
+
 # Byte-compiled / optimized / DLL files
+tro_utils/_version.py
 __pycache__/
 *.py[cod]
 *$py.class
