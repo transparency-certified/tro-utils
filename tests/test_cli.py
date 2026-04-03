@@ -690,7 +690,7 @@ class TestExtraContextCLI:
         assert result.exit_code == 0, result.output
         with open(tro_file) as f:
             data = json.load(f)
-        assert {"ex": "http://example.org/"} in data["@context"]
+        assert data["@context"]["ex"] == "http://example.org/"
 
     def test_extra_context_multiple(
         self, runner, tmp_path, temp_workspace, trs_profile
@@ -716,8 +716,8 @@ class TestExtraContextCLI:
         assert result.exit_code == 0, result.output
         with open(tro_file) as f:
             data = json.load(f)
-        assert {"ex": "http://example.org/"} in data["@context"]
-        assert {"foaf": "http://xmlns.com/foaf/0.1/"} in data["@context"]
+        assert data["@context"]["ex"] == "http://example.org/"
+        assert data["@context"]["foaf"] == "http://xmlns.com/foaf/0.1/"
 
     def test_extra_context_invalid_format(
         self, runner, tmp_path, temp_workspace, trs_profile
@@ -761,7 +761,7 @@ class TestExtraContextCLI:
         )
         with open(tro_file) as f:
             data = json.load(f)
-        base = data["@context"][0]
+        base = data["@context"]
         assert "trov" in base
 
     def test_cli_help_shows_extra_context(self, runner):

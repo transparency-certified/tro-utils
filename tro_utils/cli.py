@@ -22,11 +22,11 @@ def _parse_arrangement_ref(value: str) -> tuple[str, str | None]:
 
 
 def _parse_extra_context_value(ctx, param, value):
-    """Parse ``--extra-context`` values into JSON-LD context dicts.
+    """Parse ``--extra-context`` values into a JSON-LD context dict.
 
     Each value must be in ``PREFIX=URI`` form (e.g. ``ex=http://example.org/``).
     """
-    result = []
+    result = {}
     for v in value:
         if "=" not in v:
             raise click.BadParameter(
@@ -35,7 +35,7 @@ def _parse_extra_context_value(ctx, param, value):
                 ctx=ctx,
             )
         prefix, _, uri = v.partition("=")
-        result.append({prefix: uri})
+        result[prefix] = uri
     return result
 
 

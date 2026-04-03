@@ -28,14 +28,12 @@ from .tsa import TimeStampingAuthority
 
 TROV_VOCABULARY_VERSION = Version("0.1")
 
-_JSONLD_CONTEXT = [
-    {
-        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-        "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-        "trov": f"https://w3id.org/trace/trov/{TROV_VOCABULARY_VERSION}#",
-        "schema": "https://schema.org",
-    }
-]
+_JSONLD_CONTEXT = {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "trov": f"https://w3id.org/trace/trov/{TROV_VOCABULARY_VERSION}#",
+    "schema": "https://schema.org/",
+}
 
 
 @dataclass
@@ -56,7 +54,7 @@ class TransparentResearchObject(TROVModel):
     arrangements: list[ArtifactArrangement] = field(default_factory=list)
     performances: list[TrustedResearchPerformance] = field(default_factory=list)
     attributes: list[TROAttribute] = field(default_factory=list)
-    extra_context: list[dict] = field(default_factory=list)
+    extra_context: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # File I/O
@@ -327,7 +325,7 @@ class TransparentResearchObject(TROVModel):
                 graph_node["trov:hasPerformance"][i].update(extra)
 
         return {
-            "@context": _JSONLD_CONTEXT + self.extra_context,
+            "@context": {**_JSONLD_CONTEXT, **self.extra_context},
             "@graph": [graph_node],
         }
 
@@ -346,8 +344,17 @@ class TransparentResearchObject(TROVModel):
         """
         graph = data["@graph"][0]
 
-        raw_context = data.get("@context", [])
-        extra_context = list(raw_context[1:]) if isinstance(raw_context, list) else []
+        raw_context = data.get("@context", {})
+        if isinstance(raw_context, list):
+            # backward compat: merge list of dicts into a single dict
+            merged: dict = {}
+            for item in raw_context:
+                if isinstance(item, dict):
+                    merged.update(item)
+            raw_context = merged
+        extra_context = {
+            k: v for k, v in raw_context.items() if k not in _JSONLD_CONTEXT
+        }
 
         vocab_version = Version(graph.get("trov:vocabularyVersion", "0.0.1"))
         if vocab_version < TROV_VOCABULARY_VERSION:
