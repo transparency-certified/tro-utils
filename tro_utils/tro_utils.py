@@ -82,7 +82,7 @@ class TRO:
             self._model = TransparentResearchObject.load(self.tro_filename)
 
         if extra_context:
-            self._model.extra_context.extend(extra_context)
+            self._model.extra_context.update(extra_context)
 
         self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
         if gpg_fingerprint:
