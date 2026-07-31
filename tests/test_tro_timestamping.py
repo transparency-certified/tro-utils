@@ -1,7 +1,10 @@
 """Tests for TRO timestamping operations."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
+
+from tro_utils.tro_utils import TRO
 
 from tests.helpers import create_tro_with_gpg
 
@@ -102,3 +105,63 @@ class TestTROTimestamping:
         assert call_args[0] == "openssl"
         assert call_args[1] == "ts"
         assert call_args[2] == "-verify"
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    @patch("tro_utils.tro_utils.encoder.encode")
+    @patch("tro_utils.tro_utils.rfc3161ng.RemoteTimestamper")
+    def test_timestamped_payload_matches_saved_declaration(
+        self,
+        mock_timestamper,
+        mock_encode,
+        mock_get,
+        mock_check_call,
+        temp_workspace,
+        tmp_path,
+        gpg_setup,
+        trs_profile,
+    ):
+        """The timestamped payload must match what a verifier recomputes.
+
+        Regression test for the ordering of ``attach_public_key()``: the public
+        key has to land in the declaration before it is hashed *and* be written
+        to disk, otherwise a signed TRO fails its own ``verify_timestamp()``.
+        """
+        mock_encode.return_value = b"encoded_tsr_data"
+        mock_tsr = MagicMock()
+        mock_ts_instance = MagicMock(return_value=mock_tsr)
+        mock_timestamper.return_value = mock_ts_instance
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+
+        declaration = str(tmp_path / "test_tro.jsonld")
+        tro = create_tro_with_gpg(
+            filepath=declaration,
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+            gpg_fingerprint=gpg_setup["fingerprint"],
+            gpg_passphrase=gpg_setup["passphrase"],
+        )
+        tro.add_arrangement(str(temp_workspace), comment="Test")
+        tro.save()
+
+        tro.request_timestamp()
+        signed_payload = mock_ts_instance.call_args.kwargs["data"]
+
+        # Signing must persist the declaration it attested to
+        with open(declaration) as fp:
+            saved = json.load(fp)
+        public_key = saved["@graph"][0]["trov:wasAssembledBy"]["trov:publicKey"]
+        assert public_key.startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+
+        # A third party verifies from the files alone: no fingerprint, no
+        # passphrase, no keyring.
+        verified_payload = {}
+
+        def capture_payload(args):
+            with open(args[args.index("-data") + 1], "rb") as fp:
+                verified_payload["data"] = fp.read()
+
+        mock_check_call.side_effect = capture_payload
+        TRO(filepath=declaration).verify_timestamp()
+
+        assert verified_payload["data"] == signed_payload

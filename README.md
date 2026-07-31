@@ -24,18 +24,20 @@ It uses the `Click` library to define commands and options. Here's a summary of 
 
    - `performance`: Manages performances in the TRO. It has a subcommand `add` that adds a performance to the TRO.
 
-   - `sign`: Signs the TRO.
+   - `sign`: Signs the TRO. This records the public half of the signing key as `trov:publicKey` in the declaration, saves the declaration, and then produces the signature and the RFC 3161 timestamp over it.
 
    - `report`: Generates a report of the TRO.
 
 3. **TRO Interaction**: The script interacts with the TRO using the `TRO` class from the `tro_utils` module. It uses this class to create a new TRO, add arrangements and performances to the TRO, verify the TRO, and generate a report of the TRO.
+
+4. **GPG is only used for signing**: `--gpg-fingerprint` and `--gpg-passphrase` are recorded but never resolved against a keyring until `sign` runs. Building, inspecting, reporting on and verifying a TRO therefore need no GPG key — and no `gpg` binary at all. As a consequence, `trov:publicKey` appears in the declaration only from `sign` onwards, and is by construction the public half of the key that produced the signature (a value supplied by a TRS profile acts as a default until then).
 
 ## Installation
 
 ### Pre-requisites
 Before you begin, you need to have the following installed on your system:
 
-- GPG
+- GPG (only needed to `sign` a TRO)
 - OpenSSL
 - Python 3.8+
 
@@ -46,12 +48,15 @@ $ sudo apt-get install gnupg openssl python3 python3-pip    # on Debian/Ubuntu
 $ brew install gnupg openssl python3                        # on macOS with Homebrew
 ```
 
+If you only consume TROs — building, inspecting, reporting or `verify-timestamp` —
+GPG is not required; OpenSSL still is.
+
 ## Example Usage
 
 Assumes that:
 
 * this package is installed
-* your GPG key is present
+* your GPG key is present (needed for the `sign` step only)
 * `trs.jsonld` is available and defines TRS capabilities (see below for an example)
 
 Example workflow:

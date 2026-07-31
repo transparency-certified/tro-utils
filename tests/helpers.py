@@ -2,28 +2,19 @@
 
 import os
 
+from tro_utils import tro_utils
 from tro_utils.tro_utils import TRO
 
 
 def create_tro_with_gpg(filepath, gpg_setup, **kwargs):
-    """Helper to create TRO with proper GPG configuration."""
-    # Set GPG_HOME environment variable
+    """Create a TRO pointed at the test GPG keyring.
+
+    ``tro_utils.tro_utils.GPG_HOME`` is read at import time, so it is redirected
+    here to the keyring created by the ``gpg_setup`` fixture. GPG itself is only
+    contacted when a key is needed, so a TRO created without a fingerprint never
+    touches it.
+    """
     os.environ["GPG_HOME"] = gpg_setup["gpg_home"]
+    tro_utils.GPG_HOME = gpg_setup["gpg_home"]
 
-    # Temporarily remove gpg_fingerprint from kwargs to avoid key_map lookup error
-    gpg_fingerprint = kwargs.pop("gpg_fingerprint", None)
-
-    # Create TRO instance without fingerprint first
-    tro = TRO(filepath=filepath, **kwargs)
-
-    # Now manually set up the GPG key if fingerprint was provided
-    # This works around the key_map issue in the gnupg library
-    if gpg_fingerprint:
-        tro.gpg = gpg_setup["gpg"]
-        tro.gpg_key_id = gpg_setup["keyid"]
-        tro.data["@graph"][0]["trov:wasAssembledBy"]["trov:publicKey"] = (
-            tro.gpg.export_keys(tro.gpg_key_id)
-        )
-        tro.gpg_passphrase = kwargs.get("gpg_passphrase")
-
-    return tro
+    return TRO(filepath=filepath, **kwargs)
