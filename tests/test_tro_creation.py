@@ -46,7 +46,10 @@ class TestTROCreation:
         )
 
         assert tro.basename == "new_tro"
-        assert tro.gpg_key_id == gpg_setup["keyid"]
+        # The fingerprint is recorded but not resolved against the keyring yet
+        assert tro.gpg_fingerprint == gpg_setup["fingerprint"]
+        assert tro.gpg_key_id is None
+        assert "trov:publicKey" not in tro.data["@graph"][0]["trov:wasAssembledBy"]
         assert "TransparentResearchObject" in str(tro.data)
         assert tro.data["@graph"][0]["schema:creator"] == "Test Creator"
         assert tro.data["@graph"][0]["schema:name"] == "Test TRO"

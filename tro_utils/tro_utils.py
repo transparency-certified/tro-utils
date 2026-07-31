@@ -15,7 +15,6 @@ import pathlib
 import subprocess
 import tempfile
 
-import gnupg
 from jinja2 import Template
 import requests
 import rfc3161ng
@@ -30,10 +29,12 @@ GPG_HOME = os.environ.get("GPG_HOME")
 
 
 class TRO:
+    gpg_fingerprint = None
     gpg_key_id = None
     gpg_passphrase = None
     basename = None
     profile = None
+    _gpg_obj = None
 
     def __init__(
         self,
@@ -84,10 +85,11 @@ class TRO:
         if extra_context:
             self._model.extra_context.update(extra_context)
 
-        self.gpg = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
+        # GPG configuration is only recorded here; nothing touches the keyring
+        # until a signature is actually produced. See _gpg() and
+        # attach_public_key().
         if gpg_fingerprint:
-            self.gpg_key_id = self.gpg.list_keys().key_map[gpg_fingerprint]["keyid"]
-            self._model.trs.public_key = self.gpg.export_keys(self.gpg_key_id)
+            self.gpg_fingerprint = gpg_fingerprint
         if gpg_passphrase:
             self.gpg_passphrase = gpg_passphrase
 
@@ -182,14 +184,53 @@ class TRO:
     # Signing and timestamping
     # ------------------------------------------------------------------
 
-    def trs_signature(self):
+    def _gpg(self):
+        """Return the GPG interface, constructing it on first use.
+
+        Instantiating :class:`gnupg.GPG` spawns the ``gpg`` binary, so it is
+        deferred until a key is actually needed. Creating, mutating, saving,
+        reporting on and verifying a TRO therefore require neither the binary
+        nor a keyring.
+        """
+        if self._gpg_obj is None:
+            import gnupg
+
+            self._gpg_obj = gnupg.GPG(gnupghome=GPG_HOME, verbose=False)
+        return self._gpg_obj
+
+    def _resolve_key_id(self):
+        """Resolve the configured fingerprint against the local keyring."""
+        if self.gpg_fingerprint is None:
+            raise RuntimeError("GPG fingerprint was not provided")
         if self.gpg_key_id is None:
+            try:
+                self.gpg_key_id = (
+                    self._gpg().list_keys().key_map[self.gpg_fingerprint]["keyid"]
+                )
+            except KeyError:
+                raise RuntimeError(
+                    f"GPG key {self.gpg_fingerprint} was not found in the keyring"
+                ) from None
+        return self.gpg_key_id
+
+    def attach_public_key(self):
+        """Record the public half of the signing key in the declaration.
+
+        Called by :meth:`request_timestamp` before the declaration is hashed or
+        signed, so that ``trov:publicKey`` is by construction the public half of
+        the key that produced the signature. A value supplied by a TRS profile
+        acts as a default until it is replaced here.
+        """
+        self._model.trs.public_key = self._gpg().export_keys(self._resolve_key_id())
+
+    def trs_signature(self):
+        if self.gpg_fingerprint is None:
             raise RuntimeError("GPG fingerprint was not provided")
         if self.gpg_passphrase is None:
             raise RuntimeError("GPG passphrase was not provided")
-        signature = self.gpg.sign(
+        signature = self._gpg().sign(
             json.dumps(self.data, indent=2, sort_keys=True),
-            keyid=self.gpg_key_id,
+            keyid=self._resolve_key_id(),
             passphrase=self.gpg_passphrase,
             detach=True,
         )
@@ -198,7 +239,16 @@ class TRO:
         return signature
 
     def request_timestamp(self):
-        """Request a timestamp from a remote TSA and store the result in a file."""
+        """Request a timestamp from a remote TSA and store the result in a file.
+
+        The public key is attached and the declaration written out *before*
+        anything is hashed, so that the signature and the timestamp both cover
+        the declaration exactly as it ends up on disk. Injecting the key any
+        later — inside :meth:`trs_signature`, say — would make every TRO fail
+        its own :meth:`verify_timestamp`.
+        """
+        self.attach_public_key()
+        self.save()
         rt = rfc3161ng.RemoteTimestamper("https://freetsa.org/tsr", hashname="sha512")
         ts_data = {
             "tro_declaration": hashlib.sha512(

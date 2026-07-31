@@ -60,7 +60,9 @@ tro-utils --declaration my.jsonld performance add \
 ```
 tro-utils sign
 ```
-GPG-signs the TRO declaration, writing a `.sig` file.
+Records the signing key's public half as `trov:publicKey` in the declaration, saves the
+declaration, GPG-signs it into a `.sig` file, and timestamps both into a `.tsr` file.
+This is the only command that needs a GPG key.
 
 ```
 tro-utils report -t TEMPLATE -o OUTPUT
@@ -247,11 +249,12 @@ tro.add_performance(
     modified_arrangement="arrangement/1",   # str | (id, path) tuple | list | None
 )
 
-# Save, sign, and timestamp
+# Save, sign, and timestamp. request_timestamp() attaches trov:publicKey and
+# re-saves the declaration before signing, so the .sig and .tsr always cover the
+# declaration as it exists on disk.
 tro.save()
-tro.trs_signature()
 tro.request_timestamp()
-tro.verify_timestamp()
+tro.verify_timestamp()   # needs neither a key nor the gpg binary
 
 # Verify a replication package
 result = tro.verify_replication_package(

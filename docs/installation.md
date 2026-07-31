@@ -3,7 +3,7 @@
 ## Pre-requisites
 Before you begin, you need to have the following installed on your system:
 
-- GPG
+- GPG (only needed to `sign` a TRO)
 - OpenSSL
 - Python 3.8+
 
@@ -13,6 +13,9 @@ You can do this by running the following commands:
 $ sudo apt-get install gnupg openssl python3 python3-pip    # on Debian/Ubuntu
 $ brew install gnupg openssl python3                        # on macOS with Homebrew
 ```
+
+If you only consume TROs — building, inspecting, reporting or `verify-timestamp` —
+GPG is not required; OpenSSL still is.
 
 ## Stable release
 
