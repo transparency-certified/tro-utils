@@ -75,12 +75,30 @@ class TestProfileResolution:
         assert trs.to_jsonld()["@id"] == "ex:trs"
 
     def test_url_used_when_no_id(self):
-        trs = TrustedResearchSystem.from_profile({"trov:url": "https://wholetale.org/"})
+        trs = TrustedResearchSystem.from_profile(
+            {"schema:url": "https://wholetale.org/"}
+        )
+        assert trs.trs_id == "https://wholetale.org/"
+
+    def test_legacy_trov_url_still_used(self):
+        """Profiles predating the schema.org description of the TRS.
+
+        trov:url was never a TROV term, but profiles in the wild use it, and
+        dropping it would silently demote those systems to the unidentified
+        placeholder.
+        """
+        trs = TrustedResearchSystem.from_profile({"trov:url": "http://localhost/"})
+        assert trs.trs_id == "http://localhost/"
+
+    def test_schema_url_wins_over_trov_url(self):
+        trs = TrustedResearchSystem.from_profile(
+            {"schema:url": "https://wholetale.org/", "trov:url": "http://localhost/"}
+        )
         assert trs.trs_id == "https://wholetale.org/"
 
     def test_profile_id_wins_over_url(self):
         trs = TrustedResearchSystem.from_profile(
-            {"@id": "ex:trs", "trov:url": "https://wholetale.org/"}
+            {"@id": "ex:trs", "schema:url": "https://wholetale.org/"}
         )
         assert trs.trs_id == "ex:trs"
 
@@ -91,13 +109,13 @@ class TestProfileResolution:
         assert trs.trs_id == "https://example.org/other"
 
     def test_placeholder_when_unidentified(self):
-        trs = TrustedResearchSystem.from_profile({"trov:name": "nameless"})
+        trs = TrustedResearchSystem.from_profile({"schema:name": "nameless"})
         assert trs.trs_id == UNIDENTIFIED_TRS_ID
         assert is_conforming_trs_id(trs.trs_id)
 
     def test_non_conforming_url_falls_back(self):
-        """A trov:url that is not a usable IRI is skipped, not an error."""
-        trs = TrustedResearchSystem.from_profile({"trov:url": "localhost"})
+        """A schema:url that is not a usable IRI is skipped, not an error."""
+        trs = TrustedResearchSystem.from_profile({"schema:url": "localhost"})
         assert trs.trs_id == UNIDENTIFIED_TRS_ID
 
     def test_non_conforming_profile_id_raises(self):
@@ -108,6 +126,37 @@ class TestProfileResolution:
     def test_non_conforming_argument_raises(self):
         with pytest.raises(ValueError, match="TRS @id"):
             TrustedResearchSystem.from_profile({}, trs_id="trov:trs")
+
+    def test_schema_properties_describe_the_trs(self):
+        """A profile describes the organization with schema.org properties.
+
+        schema:name and schema:description are typed fields; the rest ride
+        along in extra_fields and reach the declaration unchanged.
+        """
+        trs = TrustedResearchSystem.from_profile(
+            {
+                "@id": "https://example.org/trs",
+                "schema:name": "shakuras",
+                "schema:description": "My local system",
+                "schema:email": "root@dev.null",
+                "schema:url": "https://example.org/trs",
+                "schema:owner": {
+                    "@id": "https://orcid.org/0000-0002-1825-0097",
+                    "@type": "schema:Person",
+                    "schema:name": "Some Operator",
+                },
+            }
+        )
+        jld = trs.to_jsonld()
+        assert jld["schema:name"] == "shakuras"
+        assert jld["schema:description"] == "My local system"
+        assert jld["schema:email"] == "root@dev.null"
+        assert jld["schema:url"] == "https://example.org/trs"
+        assert jld["schema:owner"]["@type"] == "schema:Person"
+        # Nothing invented a trov: term for any of it.
+        assert not [
+            k for k in jld if k.startswith("trov:") and k != "trov:hasCapability"
+        ]
 
     def test_default_instance_conforms(self):
         """Even the bare default carries a usable identifier."""

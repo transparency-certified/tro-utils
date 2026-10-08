@@ -73,7 +73,7 @@ class TestTROCreation:
 
         # Check that profile was loaded
         trs_data = tro.data["@graph"][0]["trov:wasAssembledBy"]
-        assert trs_data["trov:name"] == "test-trs"
+        assert trs_data["schema:name"] == "test-trs"
         assert len(trs_data["trov:hasCapability"]) == 2
 
     def test_tro_filenames(self, tmp_path, gpg_setup):

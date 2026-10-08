@@ -19,7 +19,7 @@ _KNOWN_TRS_KEYS = {
     "trov:hasCapability",
 }
 
-#: Used when a profile identifies the TRS neither by ``@id`` nor ``trov:url``.
+#: Used when a profile identifies the TRS neither by ``@id`` nor by a URL.
 UNIDENTIFIED_TRS_ID = "https://w3id.org/trace/tro-utils#unidentified-trs"
 
 # An absolute IRI and a compact IRI share this shape: a scheme/prefix per
@@ -104,9 +104,11 @@ class TRSCapability(TROVModel):
 class TrustedResearchSystem(TROVModel):
     """A Trusted Research System (TRS) that assembled and/or ran a TRO.
 
-    Unknown profile fields (e.g. ``trov:name``, ``trov:owner``, etc.) are
-    stored in :attr:`extra_fields` and round-tripped verbatim through
-    ``to_jsonld()`` / ``from_jsonld()``.
+    The TRS is a ``schema:Organization``, so it is described with schema.org
+    properties: ``schema:name`` and ``schema:description`` are typed fields,
+    and the rest (``schema:url``, ``schema:email``, ``schema:owner``, plus any
+    vendor-specific keys) are stored in :attr:`extra_fields` and round-tripped
+    verbatim through ``to_jsonld()`` / ``from_jsonld()``.
     """
 
     trs_id: str = UNIDENTIFIED_TRS_ID
@@ -131,8 +133,8 @@ class TrustedResearchSystem(TROVModel):
         :attr:`extra_fields`.
 
         The identifier is taken from *trs_id*, else the profile's ``@id``, else
-        its ``trov:url``, else :data:`UNIDENTIFIED_TRS_ID`.  Whichever is used
-        must conform -- see :func:`validate_trs_id`.
+        its ``schema:url``, else :data:`UNIDENTIFIED_TRS_ID`.  Whichever is
+        used must conform -- see :func:`validate_trs_id`.
 
         Args:
             profile: Dict with optional keys ``@id``, ``schema:name``,
@@ -172,10 +174,13 @@ class TrustedResearchSystem(TROVModel):
             return validate_trs_id(trs_id, "TRS @id")
         if "@id" in profile:
             return validate_trs_id(profile["@id"], "TRS profile @id")
-        # A TRS's URL already identifies it globally.
-        url = profile.get("trov:url")
-        if url is not None and is_conforming_trs_id(url):
-            return url
+        # A TRS's URL already identifies it globally.  trov:url is read only
+        # for profiles written before the TRS was described with schema.org
+        # properties; the TROV vocabulary never defined that term.
+        for key in ("schema:url", "trov:url"):
+            url = profile.get(key)
+            if url is not None and is_conforming_trs_id(url):
+                return url
         return UNIDENTIFIED_TRS_ID
 
     # ------------------------------------------------------------------

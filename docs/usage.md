@@ -30,15 +30,29 @@ the same identifier in every declaration that mentions it:
 {
   "@id": "https://wholetale.org/",
   "schema:name": "Whole Tale",
+  "schema:description": "A trusted research system",
+  "schema:url": "https://wholetale.org/",
+  "schema:email": "admin@wholetale.org",
+  "schema:owner": {
+    "@id": "https://orcid.org/0000-0002-1825-0097",
+    "@type": "schema:Person",
+    "schema:name": "Some Operator"
+  },
   "trov:hasCapability": []
 }
 ```
 
+The TRS is a `schema:Organization`, so schema.org properties describe it.
+`schema:name` and `schema:description` map onto typed fields; every other key,
+schema.org or vendor-specific, is carried through to the declaration verbatim.
+
 A bare relative reference such as `"trs"` does not qualify — it resolves
 against whichever document happens to contain it — and is rejected rather than
-silently replaced. When the profile states no `@id`, its `trov:url` is used if
+silently replaced. When the profile states no `@id`, its `schema:url` is used if
 it qualifies, and otherwise the TRS is recorded as
-`https://w3id.org/trace/tro-utils#unidentified-trs`.
+`https://w3id.org/trace/tro-utils#unidentified-trs`. (`trov:url` is still read
+as a fallback for profiles written before the TRS was described with
+schema.org properties, but it was never a TROV term.)
 
 Declarations written before this rule carry `"@id": "trs"`. They still load, but
 saving one raises until its TRS identifier is corrected:

@@ -84,11 +84,17 @@ def trs_profile(tmp_path_factory):
             {"@id": "trs/capability/1", "@type": "trov:CanRecordInternetAccess"},
             {"@id": "trs/capability/2", "@type": "trov:CanProvideInternetIsolation"},
         ],
-        "trov:owner": "Test User",
-        "trov:description": "Test TRS",
-        "trov:contact": "test@example.com",
-        "trov:url": "http://localhost/",
-        "trov:name": "test-trs",
+        # The TRS is a schema:Organization, so schema.org properties describe
+        # it; trov:owner/contact/url/name were never TROV terms.
+        "schema:owner": {
+            "@id": "https://orcid.org/0000-0002-1825-0097",
+            "@type": "schema:Person",
+            "schema:name": "Test User",
+        },
+        "schema:description": "Test TRS",
+        "schema:email": "test@example.com",
+        "schema:url": "http://localhost/",
+        "schema:name": "test-trs",
     }
     profile_file.write_text(json.dumps(profile_data, indent=2))
     return str(profile_file)
