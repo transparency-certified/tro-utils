@@ -151,7 +151,7 @@ class TestTransparentResearchObject:
         tro = TransparentResearchObject(
             name="Full Workflow Test",
             trs=TrustedResearchSystem(
-                trs_id="trs",
+                trs_id="https://example.org/trs",
                 capabilities=[
                     TRSCapability("trs/cap/0", "trov:CanProvideInternetIsolation")
                 ],

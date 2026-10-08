@@ -19,6 +19,39 @@ These options (or equivalent environment variables) apply to every command:
 | `--tro-name TEXT` | | Name field for a new TRO |
 | `--tro-description TEXT` | | Description field for a new TRO |
 
+### The TRS profile
+
+`--profile` points at a JSON file describing the Trusted Research System that
+assembled the TRO. Its `@id` identifies the TRS and must be either an absolute
+IRI or a compact IRI whose prefix is not `trov`, so that the same TRS carries
+the same identifier in every declaration that mentions it:
+
+```json
+{
+  "@id": "https://wholetale.org/",
+  "schema:name": "Whole Tale",
+  "trov:hasCapability": []
+}
+```
+
+A bare relative reference such as `"trs"` does not qualify — it resolves
+against whichever document happens to contain it — and is rejected rather than
+silently replaced. When the profile states no `@id`, its `trov:url` is used if
+it qualifies, and otherwise the TRS is recorded as
+`https://w3id.org/trace/tro-utils#unidentified-trs`.
+
+Declarations written before this rule carry `"@id": "trs"`. They still load, but
+saving one raises until its TRS identifier is corrected:
+
+```python
+tro = TransparentResearchObject.load("old.jsonld")
+tro.trs.trs_id = "https://wholetale.org/"
+tro.save("old.jsonld")
+```
+
+Whatever identifier the TRS ends up with is also what `trov:wasConductedBy` and
+the default `schema:creator` reference.
+
 ### Commands
 
 ```

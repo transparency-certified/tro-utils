@@ -24,7 +24,7 @@ from .performance import (
     PerformanceAttribute,
     TrustedResearchPerformance,
 )
-from .trs import TrustedResearchSystem
+from .trs import TrustedResearchSystem, validate_trs_id
 from .tsa import TimeStampingAuthority
 
 TROV_VOCABULARY_VERSION = Version("0.1")
@@ -120,9 +120,18 @@ class TransparentResearchObject(TROVModel):
     def save(self, filepath: str | pathlib.Path) -> None:
         """Serialise this TRO to a JSON-LD file on disk.
 
+        A declaration predating the TRS identifier rule loads fine but cannot
+        be written back out until its TRS carries a conforming ``@id``, so
+        that nothing non-conforming is written from here on.
+
         Args:
             filepath: Destination path (will be created/overwritten).
+
+        Raises:
+            ValueError: If the TRS ``@id`` does not conform.  See
+                :func:`~tro_utils.models.trs.validate_trs_id`.
         """
+        validate_trs_id(self.trs.trs_id, "TRS @id")
         with open(filepath, "w") as f:
             json.dump(self.to_jsonld(), f, indent=2, sort_keys=True)
 

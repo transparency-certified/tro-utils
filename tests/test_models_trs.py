@@ -26,7 +26,9 @@ class TestTrustedResearchSystem:
             "trov:publicKey": None,
             "trov:custom": "value",
         }
-        trs = TrustedResearchSystem.from_profile(profile, trs_id="trs")
+        trs = TrustedResearchSystem.from_profile(
+            profile, trs_id="https://example.org/trs"
+        )
         assert trs.extra_fields.get("trov:name") == "My TRS"
         assert trs.extra_fields.get("trov:custom") == "value"
         assert len(trs.capabilities) == 1
