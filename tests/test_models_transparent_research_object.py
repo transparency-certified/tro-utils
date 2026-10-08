@@ -153,7 +153,10 @@ class TestTransparentResearchObject:
             trs=TrustedResearchSystem(
                 trs_id="https://example.org/trs",
                 capabilities=[
-                    TRSCapability("trs/cap/0", "trov:CanProvideInternetIsolation")
+                    TRSCapability(
+                        "trov:CanProvideInternetIsolation",
+                        "trov:CanProvideInternetIsolation",
+                    )
                 ],
             ),
         )

@@ -13,7 +13,9 @@ import pytest
 from tro_utils.models import TransparentResearchObject, TrustedResearchSystem
 from tro_utils.models.trs import (
     UNIDENTIFIED_TRS_ID,
+    is_conforming_capability_id,
     is_conforming_trs_id,
+    validate_capability_id,
     validate_trs_id,
 )
 
@@ -75,12 +77,30 @@ class TestProfileResolution:
         assert trs.to_jsonld()["@id"] == "ex:trs"
 
     def test_url_used_when_no_id(self):
-        trs = TrustedResearchSystem.from_profile({"trov:url": "https://wholetale.org/"})
+        trs = TrustedResearchSystem.from_profile(
+            {"schema:url": "https://wholetale.org/"}
+        )
+        assert trs.trs_id == "https://wholetale.org/"
+
+    def test_legacy_trov_url_still_used(self):
+        """Profiles predating the schema.org description of the TRS.
+
+        trov:url was never a TROV term, but profiles in the wild use it, and
+        dropping it would silently demote those systems to the unidentified
+        placeholder.
+        """
+        trs = TrustedResearchSystem.from_profile({"trov:url": "http://localhost/"})
+        assert trs.trs_id == "http://localhost/"
+
+    def test_schema_url_wins_over_trov_url(self):
+        trs = TrustedResearchSystem.from_profile(
+            {"schema:url": "https://wholetale.org/", "trov:url": "http://localhost/"}
+        )
         assert trs.trs_id == "https://wholetale.org/"
 
     def test_profile_id_wins_over_url(self):
         trs = TrustedResearchSystem.from_profile(
-            {"@id": "ex:trs", "trov:url": "https://wholetale.org/"}
+            {"@id": "ex:trs", "schema:url": "https://wholetale.org/"}
         )
         assert trs.trs_id == "ex:trs"
 
@@ -91,13 +111,13 @@ class TestProfileResolution:
         assert trs.trs_id == "https://example.org/other"
 
     def test_placeholder_when_unidentified(self):
-        trs = TrustedResearchSystem.from_profile({"trov:name": "nameless"})
+        trs = TrustedResearchSystem.from_profile({"schema:name": "nameless"})
         assert trs.trs_id == UNIDENTIFIED_TRS_ID
         assert is_conforming_trs_id(trs.trs_id)
 
     def test_non_conforming_url_falls_back(self):
-        """A trov:url that is not a usable IRI is skipped, not an error."""
-        trs = TrustedResearchSystem.from_profile({"trov:url": "localhost"})
+        """A schema:url that is not a usable IRI is skipped, not an error."""
+        trs = TrustedResearchSystem.from_profile({"schema:url": "localhost"})
         assert trs.trs_id == UNIDENTIFIED_TRS_ID
 
     def test_non_conforming_profile_id_raises(self):
@@ -108,6 +128,37 @@ class TestProfileResolution:
     def test_non_conforming_argument_raises(self):
         with pytest.raises(ValueError, match="TRS @id"):
             TrustedResearchSystem.from_profile({}, trs_id="trov:trs")
+
+    def test_schema_properties_describe_the_trs(self):
+        """A profile describes the organization with schema.org properties.
+
+        schema:name and schema:description are typed fields; the rest ride
+        along in extra_fields and reach the declaration unchanged.
+        """
+        trs = TrustedResearchSystem.from_profile(
+            {
+                "@id": "https://example.org/trs",
+                "schema:name": "shakuras",
+                "schema:description": "My local system",
+                "schema:email": "root@dev.null",
+                "schema:url": "https://example.org/trs",
+                "schema:owner": {
+                    "@id": "https://orcid.org/0000-0002-1825-0097",
+                    "@type": "schema:Person",
+                    "schema:name": "Some Operator",
+                },
+            }
+        )
+        jld = trs.to_jsonld()
+        assert jld["schema:name"] == "shakuras"
+        assert jld["schema:description"] == "My local system"
+        assert jld["schema:email"] == "root@dev.null"
+        assert jld["schema:url"] == "https://example.org/trs"
+        assert jld["schema:owner"]["@type"] == "schema:Person"
+        # Nothing invented a trov: term for any of it.
+        assert not [
+            k for k in jld if k.startswith("trov:") and k != "trov:hasCapability"
+        ]
 
     def test_default_instance_conforms(self):
         """Even the bare default carries a usable identifier."""
@@ -179,3 +230,159 @@ class TestReferencesUseTheSameId:
         assert graph["schema:creator"]["@id"] == "https://example.org/trs"
         performance = graph["trov:hasPerformance"][0]
         assert performance["trov:wasConductedBy"]["@id"] == "https://example.org/trs"
+
+
+class TestCapabilityIdentity:
+    """A capability must be named the same way in every declaration.
+
+    ``trov:warrantedBy`` on a performance attribute points at a capability of
+    the TRS, and the TRS outlives any one declaration. A relative id like
+    ``trs/capability/1`` resolves against whichever document contains it, so
+    two declarations naming it would strictly be naming two different things.
+    Unlike a TRS ``@id``, the ``trov`` prefix is allowed here: a capability's
+    usual identifier is its own vocabulary term.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "trov:CanRecordInternetAccess",  # the usual form
+            "trov:CanProvideInternetIsolation",
+            "https://example.org/trs/capability/1",
+            "ex:capability/1",
+        ],
+    )
+    def test_conforming(self, value):
+        assert is_conforming_capability_id(value)
+        assert validate_capability_id(value) == value
+
+    @pytest.mark.parametrize(
+        "value",
+        ["trs/capability/1", "trs/cap/0", "capability/1", "", "_:b0", None, 7],
+    )
+    def test_non_conforming(self, value):
+        assert not is_conforming_capability_id(value)
+        with pytest.raises(ValueError, match="absolute IRI or a compact IRI"):
+            validate_capability_id(value)
+
+    def test_trov_prefix_allowed_unlike_trs_id(self):
+        """The one place the two rules differ."""
+        assert is_conforming_capability_id("trov:CanRecordInternetAccess")
+        assert not is_conforming_trs_id("trov:CanRecordInternetAccess")
+
+    def test_profile_entry_derives_id_from_type(self):
+        trs = TrustedResearchSystem.from_profile(
+            {"trov:hasCapability": [{"@type": "trov:CanRecordInternetAccess"}]}
+        )
+        assert trs.capabilities[0].capability_id == "trov:CanRecordInternetAccess"
+
+    def test_profile_entry_honours_a_conforming_id(self):
+        trs = TrustedResearchSystem.from_profile(
+            {
+                "trov:hasCapability": [
+                    {
+                        "@id": "https://example.org/trs/capability/1",
+                        "@type": "trov:CanRecordInternetAccess",
+                    }
+                ]
+            }
+        )
+        assert (
+            trs.capabilities[0].capability_id == "https://example.org/trs/capability/1"
+        )
+
+    def test_profile_entry_rejects_a_relative_id(self):
+        with pytest.raises(ValueError, match="TRS profile capability @id"):
+            TrustedResearchSystem.from_profile(
+                {
+                    "trov:hasCapability": [
+                        {
+                            "@id": "trs/capability/1",
+                            "@type": "trov:CanRecordInternetAccess",
+                        }
+                    ]
+                }
+            )
+
+    def test_error_suggests_omitting_the_id(self):
+        with pytest.raises(ValueError, match="Omit @id"):
+            validate_capability_id("trs/capability/1")
+
+
+class TestWarrantedByReferences:
+    """The warrant each performance attribute carries must conform too."""
+
+    def _tro(self, tmp_path, capability_id=None):
+        import datetime
+
+        from tro_utils.models import TransparentResearchObject, TRSCapability
+
+        workspace = tmp_path / "w"
+        workspace.mkdir()
+        (workspace / "main.py").write_text("print(1)")
+        capability = TRSCapability(
+            capability_id or "trov:CanProvideInternetIsolation",
+            "trov:CanProvideInternetIsolation",
+        )
+        tro = TransparentResearchObject(
+            trs=TrustedResearchSystem(
+                trs_id="https://example.org/trs", capabilities=[capability]
+            )
+        )
+        tro.add_arrangement(str(workspace), comment="before")
+        tro.add_performance(
+            datetime.datetime.now(datetime.timezone.utc),
+            datetime.datetime.now(datetime.timezone.utc),
+            accessed_arrangement="arrangement/0",
+            attrs=["trov:InternetIsolation"],
+        )
+        return tro
+
+    def test_warrant_uses_the_capability_id(self, tmp_path):
+        tro = self._tro(tmp_path)
+        attribute = tro.to_jsonld()["@graph"][0]["trov:hasPerformance"][0][
+            "trov:hasPerformanceAttribute"
+        ][0]
+        warrant = attribute["trov:warrantedBy"]["@id"]
+        assert warrant == "trov:CanProvideInternetIsolation"
+        assert is_conforming_capability_id(warrant)
+
+    def test_warrant_points_at_a_declared_capability(self, tmp_path):
+        """No dangling reference: the warrant names a capability the TRS has."""
+        graph = self._tro(tmp_path).to_jsonld()["@graph"][0]
+        declared = {
+            c["@id"] for c in graph["trov:wasAssembledBy"]["trov:hasCapability"]
+        }
+        warrants = {
+            a["trov:warrantedBy"]["@id"]
+            for p in graph["trov:hasPerformance"]
+            for a in p["trov:hasPerformanceAttribute"]
+        }
+        assert warrants <= declared
+
+    def test_relative_warrant_cannot_be_saved(self, tmp_path):
+        """A declaration built from a legacy capability id is not writable."""
+        tro = self._tro(tmp_path, capability_id="trs/capability/1")
+        out = tmp_path / "t.jsonld"
+        with pytest.raises(ValueError, match="trov:warrantedBy"):
+            tro.save(out)
+        assert not out.exists()
+
+    def test_legacy_declaration_still_loads(self, tmp_path):
+        """Reading, reporting and verifying keep working on older TROs."""
+        from tro_utils.models import TransparentResearchObject
+
+        tro = self._tro(tmp_path)
+        doc = tro.to_jsonld()
+        graph = doc["@graph"][0]
+        graph["trov:wasAssembledBy"]["trov:hasCapability"][0][
+            "@id"
+        ] = "trs/capability/1"
+        graph["trov:hasPerformance"][0]["trov:hasPerformanceAttribute"][0][
+            "trov:warrantedBy"
+        ]["@id"] = "trs/capability/1"
+        restored = TransparentResearchObject.from_jsonld(doc)
+        assert restored.trs.capabilities[0].capability_id == "trs/capability/1"
+        assert (
+            restored.performances[0].attributes[0].warranted_by_id == "trs/capability/1"
+        )

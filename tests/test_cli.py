@@ -40,8 +40,14 @@ def trs_profile(tmp_path_factory):
     profile_data = {
         "rdfs:comment": "Test TRS for CLI testing",
         "trov:hasCapability": [
-            {"@id": "trs/capability/1", "@type": "trov:CanRecordInternetAccess"},
-            {"@id": "trs/capability/2", "@type": "trov:CanProvideInternetIsolation"},
+            {
+                "@id": "trov:CanRecordInternetAccess",
+                "@type": "trov:CanRecordInternetAccess",
+            },
+            {
+                "@id": "trov:CanProvideInternetIsolation",
+                "@type": "trov:CanProvideInternetIsolation",
+            },
         ],
     }
     profile_file.write_text(json.dumps(profile_data, indent=2))
@@ -826,14 +832,16 @@ class TestCreatorType:
             runner, tmp_path / "t.jsonld", temp_workspace, trs_profile
         )
         assert creator["@type"] == "schema:Organization"
-        # This fixture profile states neither @id nor trov:url.
+        # This fixture profile states neither @id nor a URL.
         assert creator["@id"] == UNIDENTIFIED_TRS_ID
 
     def test_trs_id_from_profile_url(self, runner, tmp_path, temp_workspace):
-        """A profile's trov:url identifies the TRS when it states no @id."""
+        """A profile's schema:url identifies the TRS when it states no @id."""
         profile = tmp_path / "trs.jsonld"
         profile.write_text(
-            json.dumps({"trov:url": "https://wholetale.org/", "trov:hasCapability": []})
+            json.dumps(
+                {"schema:url": "https://wholetale.org/", "trov:hasCapability": []}
+            )
         )
         tro_file = tmp_path / "t.jsonld"
         creator = self._add_arrangement(runner, tro_file, temp_workspace, str(profile))
@@ -843,13 +851,13 @@ class TestCreatorType:
         assert graph["trov:wasAssembledBy"]["@id"] == "https://wholetale.org/"
 
     def test_trs_id_from_profile_id(self, runner, tmp_path, temp_workspace):
-        """An explicit profile @id wins over trov:url."""
+        """An explicit profile @id wins over schema:url."""
         profile = tmp_path / "trs.jsonld"
         profile.write_text(
             json.dumps(
                 {
                     "@id": "ex:trs",
-                    "trov:url": "https://wholetale.org/",
+                    "schema:url": "https://wholetale.org/",
                     "trov:hasCapability": [],
                 }
             )
