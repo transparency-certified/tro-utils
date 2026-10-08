@@ -23,6 +23,7 @@ from pyasn1.codec.der import encoder
 
 from . import __version__
 from .models import TransparentResearchObject
+from .models.agent import ORGANIZATION, Agent
 from .models.trs import TrustedResearchSystem
 
 GPG_HOME = os.environ.get("GPG_HOME")
@@ -43,6 +44,7 @@ class TRO:
         gpg_passphrase=None,
         profile=None,
         tro_creator=None,
+        tro_creator_type=None,
         tro_name=None,
         tro_description=None,
         extra_context=None,
@@ -71,8 +73,16 @@ class TRO:
 
         if not pathlib.Path(self.tro_filename).exists():
             trs = TrustedResearchSystem.from_profile(self.profile)
+            # A bare name carries no type, so honour tro_creator_type and fall
+            # back to an organization.  None lets the model credit the TRS.
+            creator = None
+            if tro_creator:
+                creator = Agent(
+                    name=tro_creator,
+                    agent_type=tro_creator_type or ORGANIZATION,
+                )
             self._model = TransparentResearchObject(
-                creator=tro_creator or "TRO utils",
+                creator=creator,
                 name=tro_name or "Some TRO",
                 description=tro_description or "Some description",
                 trs=trs,

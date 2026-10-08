@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._base import TROVModel
+from ._base import TROVModel, natural_id_key
 from .artifact import ResearchArtifact
 from .hash_value import HashValue
 
@@ -110,7 +110,7 @@ class ArtifactComposition(TROVModel):
             "@type": "trov:ArtifactComposition",
             "trov:hasArtifact": sorted(
                 [a.to_jsonld() for a in self.artifacts],
-                key=lambda x: x["@id"],
+                key=lambda x: natural_id_key(x["@id"]),
             ),
         }
         if self.fingerprint:

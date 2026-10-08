@@ -14,7 +14,8 @@ from typing import Any
 
 from packaging.version import Version
 
-from ._base import TROVModel
+from ._base import TROVModel, aware_now, ensure_aware
+from .agent import ORGANIZATION, Agent
 from .arrangement import ArtifactArrangement
 from .attribute import TROAttribute
 from .composition import ArtifactComposition
@@ -23,7 +24,7 @@ from .performance import (
     PerformanceAttribute,
     TrustedResearchPerformance,
 )
-from .trs import TrustedResearchSystem
+from .trs import TrustedResearchSystem, validate_trs_id
 from .tsa import TimeStampingAuthority
 
 TROV_VOCABULARY_VERSION = Version("0.1")
@@ -36,6 +37,20 @@ _JSONLD_CONTEXT = {
 }
 
 
+def _parse_creator(raw: Any) -> Agent | None:
+    """Parse a ``schema:creator`` value, or ``None`` when absent.
+
+    ``None`` lets :class:`TransparentResearchObject` fall back to the TRS.
+    A list (schema.org permits several creators) keeps only the first entry;
+    multiple creators are not modelled.
+    """
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None or raw == "":
+        return None
+    return Agent.coerce(raw)
+
+
 @dataclass
 class TransparentResearchObject(TROVModel):
     """Root object representing a full Transparent Research Object (TRO)."""
@@ -43,8 +58,10 @@ class TransparentResearchObject(TROVModel):
     tro_id: str = "tro"
     name: str = "Some TRO"
     description: str = "Some description"
-    creator: str = "TRO utils"
-    date_created: datetime.datetime = field(default_factory=datetime.datetime.now)
+    # An Agent, a JSON-LD agent dict, or a bare name (treated as an
+    # organization).  None mirrors the TRS -- see __post_init__.
+    creator: Agent | dict | str | None = None
+    date_created: datetime.datetime = field(default_factory=aware_now)
     vocabulary_version: str = str(TROV_VOCABULARY_VERSION)
     trs: TrustedResearchSystem = field(default_factory=TrustedResearchSystem)
     tsa: TimeStampingAuthority | None = None
@@ -55,6 +72,29 @@ class TransparentResearchObject(TROVModel):
     performances: list[TrustedResearchPerformance] = field(default_factory=list)
     attributes: list[TROAttribute] = field(default_factory=list)
     extra_context: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # ``schema:dateCreated`` must be unambiguous; a naive value is read as
+        # local wall-clock time.  See ``ensure_aware``.
+        self.date_created = ensure_aware(self.date_created)
+        # ``schema:creator`` is an agent node, never a bare name.  With no
+        # creator given, credit the TRS that assembled this TRO.
+        if self.creator is None:
+            self.creator = self._creator_from_trs()
+        else:
+            self.creator = Agent.coerce(self.creator)
+
+    def _creator_from_trs(self) -> Agent:
+        """Return the TRS as a ``schema:Organization`` creator.
+
+        The TRS is already typed ``schema:Organization`` under
+        ``trov:wasAssembledBy``, so reference it by the same ``@id``.
+        """
+        return Agent(
+            name=self.trs.name or "TRO utils",
+            agent_type=ORGANIZATION,
+            agent_id=self.trs.trs_id or None,
+        )
 
     # ------------------------------------------------------------------
     # File I/O
@@ -80,9 +120,18 @@ class TransparentResearchObject(TROVModel):
     def save(self, filepath: str | pathlib.Path) -> None:
         """Serialise this TRO to a JSON-LD file on disk.
 
+        A declaration predating the TRS identifier rule loads fine but cannot
+        be written back out until its TRS carries a conforming ``@id``, so
+        that nothing non-conforming is written from here on.
+
         Args:
             filepath: Destination path (will be created/overwritten).
+
+        Raises:
+            ValueError: If the TRS ``@id`` does not conform.  See
+                :func:`~tro_utils.models.trs.validate_trs_id`.
         """
+        validate_trs_id(self.trs.trs_id, "TRS @id")
         with open(filepath, "w") as f:
             json.dump(self.to_jsonld(), f, indent=2, sort_keys=True)
 
@@ -293,8 +342,8 @@ class TransparentResearchObject(TROVModel):
         graph_node: dict[str, Any] = {
             "@id": self.tro_id,
             "@type": ["trov:TransparentResearchObject", "schema:CreativeWork"],
-            "schema:creator": self.creator,
-            "schema:dateCreated": self.date_created.isoformat(),
+            "schema:creator": Agent.coerce(self.creator).to_jsonld(),
+            "schema:dateCreated": ensure_aware(self.date_created).isoformat(),
             "schema:description": self.description,
             "schema:name": self.name,
             "trov:vocabularyVersion": self.vocabulary_version,
@@ -405,17 +454,20 @@ class TransparentResearchObject(TROVModel):
         date_created_raw = graph.get("schema:dateCreated")
         if date_created_raw:
             try:
-                date_created = datetime.datetime.fromisoformat(date_created_raw)
+                # Timestamps without an offset are assumed to be local time.
+                date_created = ensure_aware(
+                    datetime.datetime.fromisoformat(date_created_raw)
+                )
             except ValueError:
-                date_created = datetime.datetime.now()
+                date_created = aware_now()
         else:
-            date_created = datetime.datetime.now()
+            date_created = aware_now()
 
         return cls(
             tro_id=graph.get("@id", "tro"),
             name=graph.get("schema:name", ""),
             description=graph.get("schema:description", ""),
-            creator=graph.get("schema:creator", ""),
+            creator=_parse_creator(graph.get("schema:creator")),
             date_created=date_created,
             vocabulary_version=graph.get(
                 "trov:vocabularyVersion", str(TROV_VOCABULARY_VERSION)

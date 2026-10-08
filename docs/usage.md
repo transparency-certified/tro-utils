@@ -14,9 +14,43 @@ These options (or equivalent environment variables) apply to every command:
 | `--profile PATH` | `TRS_PROFILE` | Path to the TRS profile JSON |
 | `--gpg-fingerprint KEY` | `GPG_FINGERPRINT` | GPG key fingerprint for signing |
 | `--gpg-passphrase PASS` | `GPG_PASSPHRASE` | GPG key passphrase |
-| `--tro-creator TEXT` | | Creator field for a new TRO |
+| `--tro-creator TEXT` | `TRO_CREATOR` | Creator name for a new TRO; defaults to the TRS that assembled it |
+| `--tro-creator-type [person\|organization]` | `TRO_CREATOR_TYPE` | Whether `--tro-creator` names a `schema:Person` or a `schema:Organization` (default: `organization`) |
 | `--tro-name TEXT` | | Name field for a new TRO |
 | `--tro-description TEXT` | | Description field for a new TRO |
+
+### The TRS profile
+
+`--profile` points at a JSON file describing the Trusted Research System that
+assembled the TRO. Its `@id` identifies the TRS and must be either an absolute
+IRI or a compact IRI whose prefix is not `trov`, so that the same TRS carries
+the same identifier in every declaration that mentions it:
+
+```json
+{
+  "@id": "https://wholetale.org/",
+  "schema:name": "Whole Tale",
+  "trov:hasCapability": []
+}
+```
+
+A bare relative reference such as `"trs"` does not qualify — it resolves
+against whichever document happens to contain it — and is rejected rather than
+silently replaced. When the profile states no `@id`, its `trov:url` is used if
+it qualifies, and otherwise the TRS is recorded as
+`https://w3id.org/trace/tro-utils#unidentified-trs`.
+
+Declarations written before this rule carry `"@id": "trs"`. They still load, but
+saving one raises until its TRS identifier is corrected:
+
+```python
+tro = TransparentResearchObject.load("old.jsonld")
+tro.trs.trs_id = "https://wholetale.org/"
+tro.save("old.jsonld")
+```
+
+Whatever identifier the TRS ends up with is also what `trov:wasConductedBy` and
+the default `schema:creator` reference.
 
 ### Commands
 
@@ -228,6 +262,7 @@ tro = TRO(
     gpg_passphrase="secret",
     profile="trs.jsonld",
     tro_creator="Alice",
+    tro_creator_type="schema:Person",  # default: schema:Organization
     tro_name="My TRO",
     tro_description="A sample transparent research object",
 )

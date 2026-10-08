@@ -51,7 +51,11 @@ class TestTROCreation:
         assert tro.gpg_key_id is None
         assert "trov:publicKey" not in tro.data["@graph"][0]["trov:wasAssembledBy"]
         assert "TransparentResearchObject" in str(tro.data)
-        assert tro.data["@graph"][0]["schema:creator"] == "Test Creator"
+        # schema:creator is an agent node; a bare name defaults to an org.
+        assert tro.data["@graph"][0]["schema:creator"] == {
+            "@type": "schema:Organization",
+            "schema:name": "Test Creator",
+        }
         assert tro.data["@graph"][0]["schema:name"] == "Test TRO"
         assert not (tmp_path / "new_tro.jsonld").exists()
         tro.save()

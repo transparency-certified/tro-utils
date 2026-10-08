@@ -1,6 +1,7 @@
 """OOP data models for Transparent Research Objects (TRO)."""
 
 from .hash_value import HashValue
+from .agent import Agent, ORGANIZATION, PERSON
 from .artifact import ResearchArtifact
 from .composition import ArtifactComposition, CompositionFingerprint
 from .arrangement import ArtifactArrangement, ArtifactLocation
@@ -16,6 +17,9 @@ from .tro import TransparentResearchObject
 
 __all__ = [
     "HashValue",
+    "Agent",
+    "ORGANIZATION",
+    "PERSON",
     "ResearchArtifact",
     "ArtifactComposition",
     "CompositionFingerprint",

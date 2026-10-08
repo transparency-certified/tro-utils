@@ -90,7 +90,9 @@ class ReplicationPackage:
                 )
 
         # Files present in the arrangement but absent from the package
-        result.files_missing_in_package = list(arrangement_map.keys())
+        result.files_missing_in_package = sorted(arrangement_map.keys())
+        result.files_missing_in_arrangement.sort()
+        result.mismatched_hashes.sort()
         return result
 
     # ------------------------------------------------------------------
@@ -122,15 +124,21 @@ class ReplicationPackage:
         root: pathlib.Path,
         subpath: str | None,
     ) -> Iterator[tuple[str, str]]:
+        # os.walk yields filesystem order, so sort to keep the reported
+        # discrepancy lists identical from one machine to the next.
+        discovered: list[pathlib.Path] = []
         for dirpath, _dirs, files in os.walk(root):
             for filename in files:
-                filepath = pathlib.Path(dirpath) / filename
-                original = filepath.relative_to(root).as_posix()
-                rel = ReplicationPackage._apply_subpath(original, subpath)
-                if rel is None:
-                    continue
-                hash_str = ReplicationPackage._sha256_file(filepath)
-                yield rel, hash_str
+                discovered.append(pathlib.Path(dirpath) / filename)
+        discovered.sort(key=lambda p: p.relative_to(root).as_posix())
+
+        for filepath in discovered:
+            original = filepath.relative_to(root).as_posix()
+            rel = ReplicationPackage._apply_subpath(original, subpath)
+            if rel is None:
+                continue
+            hash_str = ReplicationPackage._sha256_file(filepath)
+            yield rel, hash_str
 
     @staticmethod
     def _iter_zip(

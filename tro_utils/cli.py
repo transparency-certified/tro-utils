@@ -39,6 +39,16 @@ def _parse_extra_context_value(ctx, param, value):
     return result
 
 
+# click.DateTime()'s defaults accept no UTC offset, so add the offset-bearing
+# variants.  Values given without one are treated as local time by the model.
+_DATETIME_FORMATS = [
+    "%Y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S%z",
+]
+
 _TEMPLATES = {
     "default": {
         "description": "Default pretty template by Craig Willis",
@@ -109,6 +119,18 @@ class StringOrPath(click.ParamType):
     help="TRO creator (only used when creating a new TRO)",
 )
 @click.option(
+    "--tro-creator-type",
+    envvar="TRO_CREATOR_TYPE",
+    type=click.Choice(["person", "organization"]),
+    required=False,
+    default="organization",
+    show_default=True,
+    help=(
+        "Whether --tro-creator names a schema:Person or a schema:Organization "
+        "(only used when creating a new TRO)"
+    ),
+)
+@click.option(
     "--tro-name",
     envvar="TRO_NAME",
     type=click.STRING,
@@ -142,6 +164,7 @@ def cli(
     gpg_fingerprint,
     gpg_passphrase,
     tro_creator,
+    tro_creator_type,
     tro_name,
     tro_description,
     extra_context,
@@ -341,6 +364,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
     tro_name = ctx.params.get("tro_name")
     tro_description = ctx.params.get("tro_description")
     tro_creator = ctx.params.get("tro_creator")
+    tro_creator_type = ctx.params.get("tro_creator_type")
     extra_context = ctx.params.get("extra_context") or []
     tro = TRO(
         filepath=declaration,
@@ -348,6 +372,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
         gpg_passphrase=gpg_passphrase,
         profile=profile,
         tro_creator=tro_creator,
+        tro_creator_type=tro_creator_type,
         tro_name=tro_name,
         tro_description=tro_description,
         extra_context=extra_context or None,
@@ -423,16 +448,16 @@ def generate_report(ctx, template, output):
 @click.option(
     "--start",
     "-s",
-    type=click.DateTime(),
+    type=click.DateTime(formats=_DATETIME_FORMATS),
     required=False,
-    help="Start time of the performance",
+    help="Start time of the performance (local time assumed if no UTC offset given)",
 )
 @click.option(
     "--end",
     "-e",
-    type=click.DateTime(),
+    type=click.DateTime(formats=_DATETIME_FORMATS),
     required=False,
-    help="End time of the performance",
+    help="End time of the performance (local time assumed if no UTC offset given)",
 )
 @click.option(
     "--attribute",

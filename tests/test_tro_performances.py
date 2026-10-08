@@ -49,8 +49,16 @@ class TestTROPerformances:
 
         perf = performances[0]
         assert perf["rdfs:comment"] == "Data processing workflow"
-        assert perf["trov:startedAtTime"] == "2024-01-01T10:00:00"
-        assert perf["trov:endedAtTime"] == "2024-01-01T11:00:00"
+        # Naive input is stamped with the local offset, never serialised naive.
+        assert perf["trov:startedAtTime"] == start_time.astimezone().isoformat()
+        assert perf["trov:endedAtTime"] == end_time.astimezone().isoformat()
+        assert (
+            datetime.datetime.fromisoformat(perf["trov:startedAtTime"]).tzinfo
+            is not None
+        )
+        assert (
+            datetime.datetime.fromisoformat(perf["trov:endedAtTime"]).tzinfo is not None
+        )
         accessed = perf["trov:accessedArrangement"]
         assert accessed["@type"] == "trov:ArrangementBinding"
         assert accessed["trov:arrangement"]["@id"] == "arrangement/0"

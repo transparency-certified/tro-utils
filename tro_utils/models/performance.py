@@ -6,7 +6,7 @@ import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._base import TROVModel
+from ._base import TROVModel, ensure_aware
 
 
 @dataclass
@@ -94,6 +94,12 @@ class TrustedResearchPerformance(TROVModel):
     attributes: list[PerformanceAttribute] = field(default_factory=list)
     extra_attributes: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Performance timestamps must be unambiguous; naive values are read as
+        # local wall-clock time.  See ``ensure_aware``.
+        self.started_at = ensure_aware(self.started_at)
+        self.ended_at = ensure_aware(self.ended_at)
+
     # ------------------------------------------------------------------
     # JSON-LD serialisation
     # ------------------------------------------------------------------
@@ -109,9 +115,9 @@ class TrustedResearchPerformance(TROVModel):
             ],
         }
         if self.started_at is not None:
-            result["trov:startedAtTime"] = self.started_at.isoformat()
+            result["trov:startedAtTime"] = ensure_aware(self.started_at).isoformat()
         if self.ended_at is not None:
-            result["trov:endedAtTime"] = self.ended_at.isoformat()
+            result["trov:endedAtTime"] = ensure_aware(self.ended_at).isoformat()
         if len(self.accessed_arrangements) == 1:
             result["trov:accessedArrangement"] = self.accessed_arrangements[
                 0
@@ -144,9 +150,10 @@ class TrustedResearchPerformance(TROVModel):
         """
 
         def _parse_dt(value: str | None) -> datetime.datetime | None:
+            """Parse an ISO 8601 timestamp, assuming local time if no offset."""
             if value is None:
                 return None
-            return datetime.datetime.fromisoformat(value)
+            return ensure_aware(datetime.datetime.fromisoformat(value))
 
         attributes = [
             PerformanceAttribute.from_jsonld(attr)

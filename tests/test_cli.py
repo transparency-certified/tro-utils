@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from click.exceptions import BadParameter
 
 from tro_utils.cli import cli, StringOrPath
+from tro_utils.models.trs import UNIDENTIFIED_TRS_ID
 
 
 @pytest.fixture
@@ -769,3 +770,129 @@ class TestExtraContextCLI:
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         assert "extra-context" in result.output
+
+
+class TestCreatorType:
+    """--tro-creator / --tro-creator-type produce a typed agent node."""
+
+    def _add_arrangement(self, runner, tro_file, temp_workspace, trs_profile, *extra):
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                *extra,
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            return json.load(f)["@graph"][0]["schema:creator"]
+
+    def test_creator_defaults_to_organization(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        creator = self._add_arrangement(
+            runner,
+            tmp_path / "t.jsonld",
+            temp_workspace,
+            trs_profile,
+            "--tro-creator",
+            "Alice",
+        )
+        assert creator == {"@type": "schema:Organization", "schema:name": "Alice"}
+
+    def test_creator_type_person(self, runner, tmp_path, temp_workspace, trs_profile):
+        creator = self._add_arrangement(
+            runner,
+            tmp_path / "t.jsonld",
+            temp_workspace,
+            trs_profile,
+            "--tro-creator",
+            "Alice",
+            "--tro-creator-type",
+            "person",
+        )
+        assert creator == {"@type": "schema:Person", "schema:name": "Alice"}
+
+    def test_creator_omitted_mirrors_trs(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        creator = self._add_arrangement(
+            runner, tmp_path / "t.jsonld", temp_workspace, trs_profile
+        )
+        assert creator["@type"] == "schema:Organization"
+        # This fixture profile states neither @id nor trov:url.
+        assert creator["@id"] == UNIDENTIFIED_TRS_ID
+
+    def test_trs_id_from_profile_url(self, runner, tmp_path, temp_workspace):
+        """A profile's trov:url identifies the TRS when it states no @id."""
+        profile = tmp_path / "trs.jsonld"
+        profile.write_text(
+            json.dumps({"trov:url": "https://wholetale.org/", "trov:hasCapability": []})
+        )
+        tro_file = tmp_path / "t.jsonld"
+        creator = self._add_arrangement(runner, tro_file, temp_workspace, str(profile))
+        assert creator["@id"] == "https://wholetale.org/"
+        with open(tro_file) as f:
+            graph = json.load(f)["@graph"][0]
+        assert graph["trov:wasAssembledBy"]["@id"] == "https://wholetale.org/"
+
+    def test_trs_id_from_profile_id(self, runner, tmp_path, temp_workspace):
+        """An explicit profile @id wins over trov:url."""
+        profile = tmp_path / "trs.jsonld"
+        profile.write_text(
+            json.dumps(
+                {
+                    "@id": "ex:trs",
+                    "trov:url": "https://wholetale.org/",
+                    "trov:hasCapability": [],
+                }
+            )
+        )
+        creator = self._add_arrangement(
+            runner, tmp_path / "t.jsonld", temp_workspace, str(profile)
+        )
+        assert creator["@id"] == "ex:trs"
+
+    def test_nonconforming_profile_id_rejected(self, runner, tmp_path, temp_workspace):
+        """A bare profile @id is reported rather than silently replaced."""
+        profile = tmp_path / "trs.jsonld"
+        profile.write_text(json.dumps({"@id": "trs", "trov:hasCapability": []}))
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tmp_path / "t.jsonld"),
+                "--profile",
+                str(profile),
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code != 0
+        assert isinstance(result.exception, ValueError)
+        assert "absolute IRI" in str(result.exception)
+
+    def test_invalid_creator_type_rejected(self, runner, tmp_path, trs_profile):
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tmp_path / "t.jsonld"),
+                "--tro-creator-type",
+                "robot",
+                "arrangement",
+                "list",
+            ],
+        )
+        assert result.exit_code != 0
+
+    def test_cli_help_shows_creator_type(self, runner):
+        result = runner.invoke(cli, ["--help"])
+        assert "--tro-creator-type" in result.output
