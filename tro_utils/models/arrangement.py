@@ -14,7 +14,7 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._base import TROVModel
+from ._base import TROVModel, natural_id_key
 from .artifact import ResearchArtifact
 from .composition import ArtifactComposition
 
@@ -91,14 +91,23 @@ class ArtifactArrangement(TROVModel):
         directory = pathlib.Path(directory)
         magic_wrapper = magic.Magic(mime=True, uncompress=True)
 
-        # Collect sha256 for all files in the directory
-        file_hashes: dict[pathlib.Path, str] = {}
+        # Collect the file list first, then sort by relative path.  os.walk
+        # yields entries in filesystem order, which differs between machines;
+        # since this order decides both artifact @id assignment below and the
+        # order of trov:hasArtifactLocation, scanning the same tree twice has
+        # to walk it in the same order to produce the same declaration.
+        discovered: list[pathlib.Path] = []
         for root, dirs, files in os.walk(str(directory)):
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for filename in files:
-                filepath = pathlib.Path(root) / filename
-                hash_str = cls._sha256_for_file(str(filepath), resolve_symlinks)
-                file_hashes[filepath] = hash_str
+                discovered.append(pathlib.Path(root) / filename)
+        discovered.sort(key=lambda p: p.relative_to(directory).as_posix())
+
+        # Collect sha256 for all files in the directory
+        file_hashes: dict[pathlib.Path, str] = {
+            filepath: cls._sha256_for_file(str(filepath), resolve_symlinks)
+            for filepath in discovered
+        }
 
         # Add any new artifacts to the composition
         for filepath, hash_str in file_hashes.items():
@@ -185,8 +194,20 @@ class ArtifactArrangement(TROVModel):
             "@id": self.arrangement_id,
             "@type": "trov:ArtifactArrangement",
             "rdfs:comment": self.comment,
-            "trov:hasArtifactLocation": [loc.to_jsonld() for loc in self.locations],
+            "trov:hasArtifactLocation": [
+                loc.to_jsonld() for loc in self._sorted_locations()
+            ],
         }
+
+    def _sorted_locations(self) -> list[ArtifactLocation]:
+        """Return locations in a stable, machine-independent order.
+
+        Sorted by path so a declaration serialises identically wherever it was
+        produced; ``location_id`` breaks ties for the rare duplicate path.
+        """
+        return sorted(
+            self.locations, key=lambda loc: (loc.path, natural_id_key(loc.location_id))
+        )
 
     @classmethod
     def from_jsonld(cls, data: dict[str, Any]) -> "ArtifactArrangement":
@@ -228,15 +249,20 @@ class ArtifactArrangement(TROVModel):
             A JSON-serialisable dict.
         """
         artifact_ids = {loc.artifact_id for loc in self.locations}
-        artifacts = [
-            a.to_jsonld()
-            for a in composition.artifacts
-            if a.artifact_id in artifact_ids
-        ]
+        artifacts = sorted(
+            (
+                a.to_jsonld()
+                for a in composition.artifacts
+                if a.artifact_id in artifact_ids
+            ),
+            key=lambda a: natural_id_key(a["@id"]),
+        )
         return {
             "@type": "trov:ArrangementSnapshot",
             "rdfs:comment": self.comment,
-            "trov:hasArtifactLocation": [loc.to_jsonld() for loc in self.locations],
+            "trov:hasArtifactLocation": [
+                loc.to_jsonld() for loc in self._sorted_locations()
+            ],
             "trov:hasArtifact": artifacts,
         }
 
@@ -283,9 +309,12 @@ class ArtifactArrangement(TROVModel):
             for art_data in data.get("trov:hasArtifact", [])
         }
 
-        # Merge each snapshot artifact into the target composition, tracking IDs
+        # Merge each snapshot artifact into the target composition, tracking
+        # IDs.  Iterate in a fixed order: this decides the @id each artifact
+        # gets in the target composition.
         id_remap: dict[str, str] = {}  # snapshot_id to target composition id
-        for snap_id, artifact in snap_artifacts.items():
+        for snap_id in sorted(snap_artifacts, key=natural_id_key):
+            artifact = snap_artifacts[snap_id]
             hash_str = artifact.hash.to_string()
             existing = target_composition.get_by_hash(hash_str)
             if existing is not None:
@@ -301,9 +330,14 @@ class ArtifactArrangement(TROVModel):
                 )
                 id_remap[snap_id] = new_id
 
-        # Rebuild locations with remapped artifact IDs
+        # Rebuild locations with remapped artifact IDs, in path order so the
+        # new location @ids do not depend on the snapshot's internal ordering.
         locations: list[ArtifactLocation] = []
-        for i, loc_data in enumerate(data.get("trov:hasArtifactLocation", [])):
+        raw_locations = sorted(
+            data.get("trov:hasArtifactLocation", []),
+            key=lambda loc: (loc["trov:path"], natural_id_key(loc["@id"])),
+        )
+        for i, loc_data in enumerate(raw_locations):
             snap_art_id = loc_data["trov:artifact"]["@id"]
             locations.append(
                 ArtifactLocation(
