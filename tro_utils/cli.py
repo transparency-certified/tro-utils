@@ -39,6 +39,16 @@ def _parse_extra_context_value(ctx, param, value):
     return result
 
 
+# click.DateTime()'s defaults accept no UTC offset, so add the offset-bearing
+# variants.  Values given without one are treated as local time by the model.
+_DATETIME_FORMATS = [
+    "%Y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S%z",
+]
+
 _TEMPLATES = {
     "default": {
         "description": "Default pretty template by Craig Willis",
@@ -423,16 +433,16 @@ def generate_report(ctx, template, output):
 @click.option(
     "--start",
     "-s",
-    type=click.DateTime(),
+    type=click.DateTime(formats=_DATETIME_FORMATS),
     required=False,
-    help="Start time of the performance",
+    help="Start time of the performance (local time assumed if no UTC offset given)",
 )
 @click.option(
     "--end",
     "-e",
-    type=click.DateTime(),
+    type=click.DateTime(formats=_DATETIME_FORMATS),
     required=False,
-    help="End time of the performance",
+    help="End time of the performance (local time assumed if no UTC offset given)",
 )
 @click.option(
     "--attribute",

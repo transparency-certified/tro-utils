@@ -42,6 +42,43 @@ class TestTransparentResearchObject:
         assert restored.description == tro.description
         assert restored.creator == tro.creator
 
+    def test_date_created_default_is_aware(self):
+        tro = self._make_tro()
+        assert tro.date_created.tzinfo is not None
+        assert (
+            datetime.datetime.fromisoformat(
+                tro.to_jsonld()["@graph"][0]["schema:dateCreated"]
+            ).tzinfo
+            is not None
+        )
+
+    def test_naive_date_created_becomes_aware(self):
+        naive = datetime.datetime(2024, 6, 1, 10, 0)
+        tro = TransparentResearchObject(date_created=naive)
+        assert tro.date_created == naive.astimezone()
+        assert tro.date_created.tzinfo is not None
+
+    def test_offsetless_date_created_parsed_as_aware(self):
+        """Legacy declarations written without an offset load as local time."""
+        tro = self._make_tro()
+        jld = tro.to_jsonld()
+        jld["@graph"][0]["schema:dateCreated"] = "2026-03-27T13:37:05.646960"
+        restored = TransparentResearchObject.from_jsonld(jld)
+        assert (
+            restored.date_created
+            == datetime.datetime(2026, 3, 27, 13, 37, 5, 646960).astimezone()
+        )
+
+    def test_date_created_offset_preserved(self):
+        tz = datetime.timezone(datetime.timedelta(hours=9))
+        tro = TransparentResearchObject(
+            date_created=datetime.datetime(2024, 6, 1, 10, 0, tzinfo=tz)
+        )
+        graph = tro.to_jsonld()["@graph"][0]
+        assert graph["schema:dateCreated"] == "2024-06-01T10:00:00+09:00"
+        restored = TransparentResearchObject.from_jsonld(tro.to_jsonld())
+        assert restored.date_created.utcoffset() == datetime.timedelta(hours=9)
+
     def test_from_jsonld_old_vocab_raises(self):
         jld = {
             "@context": [{}],

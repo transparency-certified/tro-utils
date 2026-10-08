@@ -14,7 +14,7 @@ from typing import Any
 
 from packaging.version import Version
 
-from ._base import TROVModel
+from ._base import TROVModel, aware_now, ensure_aware
 from .arrangement import ArtifactArrangement
 from .attribute import TROAttribute
 from .composition import ArtifactComposition
@@ -44,7 +44,7 @@ class TransparentResearchObject(TROVModel):
     name: str = "Some TRO"
     description: str = "Some description"
     creator: str = "TRO utils"
-    date_created: datetime.datetime = field(default_factory=datetime.datetime.now)
+    date_created: datetime.datetime = field(default_factory=aware_now)
     vocabulary_version: str = str(TROV_VOCABULARY_VERSION)
     trs: TrustedResearchSystem = field(default_factory=TrustedResearchSystem)
     tsa: TimeStampingAuthority | None = None
@@ -55,6 +55,11 @@ class TransparentResearchObject(TROVModel):
     performances: list[TrustedResearchPerformance] = field(default_factory=list)
     attributes: list[TROAttribute] = field(default_factory=list)
     extra_context: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # ``schema:dateCreated`` must be unambiguous; a naive value is read as
+        # local wall-clock time.  See ``ensure_aware``.
+        self.date_created = ensure_aware(self.date_created)
 
     # ------------------------------------------------------------------
     # File I/O
@@ -294,7 +299,7 @@ class TransparentResearchObject(TROVModel):
             "@id": self.tro_id,
             "@type": ["trov:TransparentResearchObject", "schema:CreativeWork"],
             "schema:creator": self.creator,
-            "schema:dateCreated": self.date_created.isoformat(),
+            "schema:dateCreated": ensure_aware(self.date_created).isoformat(),
             "schema:description": self.description,
             "schema:name": self.name,
             "trov:vocabularyVersion": self.vocabulary_version,
@@ -405,11 +410,14 @@ class TransparentResearchObject(TROVModel):
         date_created_raw = graph.get("schema:dateCreated")
         if date_created_raw:
             try:
-                date_created = datetime.datetime.fromisoformat(date_created_raw)
+                # Timestamps without an offset are assumed to be local time.
+                date_created = ensure_aware(
+                    datetime.datetime.fromisoformat(date_created_raw)
+                )
             except ValueError:
-                date_created = datetime.datetime.now()
+                date_created = aware_now()
         else:
-            date_created = datetime.datetime.now()
+            date_created = aware_now()
 
         return cls(
             tro_id=graph.get("@id", "tro"),
