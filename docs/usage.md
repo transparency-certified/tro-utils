@@ -14,7 +14,8 @@ These options (or equivalent environment variables) apply to every command:
 | `--profile PATH` | `TRS_PROFILE` | Path to the TRS profile JSON |
 | `--gpg-fingerprint KEY` | `GPG_FINGERPRINT` | GPG key fingerprint for signing |
 | `--gpg-passphrase PASS` | `GPG_PASSPHRASE` | GPG key passphrase |
-| `--tro-creator TEXT` | | Creator field for a new TRO |
+| `--tro-creator TEXT` | `TRO_CREATOR` | Creator name for a new TRO; defaults to the TRS that assembled it |
+| `--tro-creator-type [person\|organization]` | `TRO_CREATOR_TYPE` | Whether `--tro-creator` names a `schema:Person` or a `schema:Organization` (default: `organization`) |
 | `--tro-name TEXT` | | Name field for a new TRO |
 | `--tro-description TEXT` | | Description field for a new TRO |
 
@@ -228,6 +229,7 @@ tro = TRO(
     gpg_passphrase="secret",
     profile="trs.jsonld",
     tro_creator="Alice",
+    tro_creator_type="schema:Person",  # default: schema:Organization
     tro_name="My TRO",
     tro_description="A sample transparent research object",
 )

@@ -15,6 +15,7 @@ from typing import Any
 from packaging.version import Version
 
 from ._base import TROVModel, aware_now, ensure_aware
+from .agent import ORGANIZATION, Agent
 from .arrangement import ArtifactArrangement
 from .attribute import TROAttribute
 from .composition import ArtifactComposition
@@ -36,6 +37,20 @@ _JSONLD_CONTEXT = {
 }
 
 
+def _parse_creator(raw: Any) -> Agent | None:
+    """Parse a ``schema:creator`` value, or ``None`` when absent.
+
+    ``None`` lets :class:`TransparentResearchObject` fall back to the TRS.
+    A list (schema.org permits several creators) keeps only the first entry;
+    multiple creators are not modelled.
+    """
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None or raw == "":
+        return None
+    return Agent.coerce(raw)
+
+
 @dataclass
 class TransparentResearchObject(TROVModel):
     """Root object representing a full Transparent Research Object (TRO)."""
@@ -43,7 +58,9 @@ class TransparentResearchObject(TROVModel):
     tro_id: str = "tro"
     name: str = "Some TRO"
     description: str = "Some description"
-    creator: str = "TRO utils"
+    # An Agent, a JSON-LD agent dict, or a bare name (treated as an
+    # organization).  None mirrors the TRS -- see __post_init__.
+    creator: Agent | dict | str | None = None
     date_created: datetime.datetime = field(default_factory=aware_now)
     vocabulary_version: str = str(TROV_VOCABULARY_VERSION)
     trs: TrustedResearchSystem = field(default_factory=TrustedResearchSystem)
@@ -60,6 +77,24 @@ class TransparentResearchObject(TROVModel):
         # ``schema:dateCreated`` must be unambiguous; a naive value is read as
         # local wall-clock time.  See ``ensure_aware``.
         self.date_created = ensure_aware(self.date_created)
+        # ``schema:creator`` is an agent node, never a bare name.  With no
+        # creator given, credit the TRS that assembled this TRO.
+        if self.creator is None:
+            self.creator = self._creator_from_trs()
+        else:
+            self.creator = Agent.coerce(self.creator)
+
+    def _creator_from_trs(self) -> Agent:
+        """Return the TRS as a ``schema:Organization`` creator.
+
+        The TRS is already typed ``schema:Organization`` under
+        ``trov:wasAssembledBy``, so reference it by the same ``@id``.
+        """
+        return Agent(
+            name=self.trs.name or "TRO utils",
+            agent_type=ORGANIZATION,
+            agent_id=self.trs.trs_id or None,
+        )
 
     # ------------------------------------------------------------------
     # File I/O
@@ -298,7 +333,7 @@ class TransparentResearchObject(TROVModel):
         graph_node: dict[str, Any] = {
             "@id": self.tro_id,
             "@type": ["trov:TransparentResearchObject", "schema:CreativeWork"],
-            "schema:creator": self.creator,
+            "schema:creator": Agent.coerce(self.creator).to_jsonld(),
             "schema:dateCreated": ensure_aware(self.date_created).isoformat(),
             "schema:description": self.description,
             "schema:name": self.name,
@@ -423,7 +458,7 @@ class TransparentResearchObject(TROVModel):
             tro_id=graph.get("@id", "tro"),
             name=graph.get("schema:name", ""),
             description=graph.get("schema:description", ""),
-            creator=graph.get("schema:creator", ""),
+            creator=_parse_creator(graph.get("schema:creator")),
             date_created=date_created,
             vocabulary_version=graph.get(
                 "trov:vocabularyVersion", str(TROV_VOCABULARY_VERSION)

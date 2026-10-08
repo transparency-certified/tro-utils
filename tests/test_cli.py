@@ -769,3 +769,78 @@ class TestExtraContextCLI:
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         assert "extra-context" in result.output
+
+
+class TestCreatorType:
+    """--tro-creator / --tro-creator-type produce a typed agent node."""
+
+    def _add_arrangement(self, runner, tro_file, temp_workspace, trs_profile, *extra):
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                *extra,
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        with open(tro_file) as f:
+            return json.load(f)["@graph"][0]["schema:creator"]
+
+    def test_creator_defaults_to_organization(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        creator = self._add_arrangement(
+            runner,
+            tmp_path / "t.jsonld",
+            temp_workspace,
+            trs_profile,
+            "--tro-creator",
+            "Alice",
+        )
+        assert creator == {"@type": "schema:Organization", "schema:name": "Alice"}
+
+    def test_creator_type_person(self, runner, tmp_path, temp_workspace, trs_profile):
+        creator = self._add_arrangement(
+            runner,
+            tmp_path / "t.jsonld",
+            temp_workspace,
+            trs_profile,
+            "--tro-creator",
+            "Alice",
+            "--tro-creator-type",
+            "person",
+        )
+        assert creator == {"@type": "schema:Person", "schema:name": "Alice"}
+
+    def test_creator_omitted_mirrors_trs(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        creator = self._add_arrangement(
+            runner, tmp_path / "t.jsonld", temp_workspace, trs_profile
+        )
+        assert creator["@type"] == "schema:Organization"
+        assert creator["@id"] == "trs"
+
+    def test_invalid_creator_type_rejected(self, runner, tmp_path, trs_profile):
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tmp_path / "t.jsonld"),
+                "--tro-creator-type",
+                "robot",
+                "arrangement",
+                "list",
+            ],
+        )
+        assert result.exit_code != 0
+
+    def test_cli_help_shows_creator_type(self, runner):
+        result = runner.invoke(cli, ["--help"])
+        assert "--tro-creator-type" in result.output

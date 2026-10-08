@@ -119,6 +119,18 @@ class StringOrPath(click.ParamType):
     help="TRO creator (only used when creating a new TRO)",
 )
 @click.option(
+    "--tro-creator-type",
+    envvar="TRO_CREATOR_TYPE",
+    type=click.Choice(["person", "organization"]),
+    required=False,
+    default="organization",
+    show_default=True,
+    help=(
+        "Whether --tro-creator names a schema:Person or a schema:Organization "
+        "(only used when creating a new TRO)"
+    ),
+)
+@click.option(
     "--tro-name",
     envvar="TRO_NAME",
     type=click.STRING,
@@ -152,6 +164,7 @@ def cli(
     gpg_fingerprint,
     gpg_passphrase,
     tro_creator,
+    tro_creator_type,
     tro_name,
     tro_description,
     extra_context,
@@ -351,6 +364,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
     tro_name = ctx.params.get("tro_name")
     tro_description = ctx.params.get("tro_description")
     tro_creator = ctx.params.get("tro_creator")
+    tro_creator_type = ctx.params.get("tro_creator_type")
     extra_context = ctx.params.get("extra_context") or []
     tro = TRO(
         filepath=declaration,
@@ -358,6 +372,7 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
         gpg_passphrase=gpg_passphrase,
         profile=profile,
         tro_creator=tro_creator,
+        tro_creator_type=tro_creator_type,
         tro_name=tro_name,
         tro_description=tro_description,
         extra_context=extra_context or None,
