@@ -38,9 +38,17 @@ the same identifier in every declaration that mentions it:
     "@type": "schema:Person",
     "schema:name": "Some Operator"
   },
-  "trov:hasCapability": []
+  "trov:hasCapability": [
+    { "@type": "trov:CanProvideInternetIsolation" }
+  ]
 }
 ```
+
+A capability is identified by the `@id` of its `trov:hasCapability` entry, and
+that is what `trov:warrantedBy` points at from every performance attribute
+claiming it. It must be a compact or absolute IRI; omitting `@id`, as above,
+uses the capability's own term, which is the usual identifier for it. A
+relative id such as `trs/capability/1` is rejected.
 
 The TRS is a `schema:Organization`, so schema.org properties describe it.
 `schema:name` and `schema:description` map onto typed fields; every other key,

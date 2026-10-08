@@ -7,7 +7,9 @@ class TestTRSCapability:
     """Unit tests for TRSCapability."""
 
     def test_to_from_jsonld(self):
-        cap = TRSCapability("trs/capability/0", "trov:CanProvideInternetIsolation")
+        cap = TRSCapability(
+            "trov:CanProvideInternetIsolation", "trov:CanProvideInternetIsolation"
+        )
         jld = cap.to_jsonld()
         restored = TRSCapability.from_jsonld(jld)
         assert restored.capability_id == cap.capability_id
@@ -46,7 +48,10 @@ class TestTrustedResearchSystem:
                 "schema:name": "Some Operator",
             },
             "trov:hasCapability": [
-                {"@id": "trs/cap/0", "@type": "trov:CanProvideInternetIsolation"}
+                {
+                    "@id": "trov:CanProvideInternetIsolation",
+                    "@type": "trov:CanProvideInternetIsolation",
+                }
             ],
             "trov:publicKey": None,
             "ex:custom": "value",
@@ -82,7 +87,10 @@ class TestTrustedResearchSystem:
             name="Test TRS",
             description="desc",
             capabilities=[
-                TRSCapability("trs/cap/0", "trov:CanProvideInternetIsolation")
+                TRSCapability(
+                    "trov:CanProvideInternetIsolation",
+                    "trov:CanProvideInternetIsolation",
+                )
             ],
             extra_fields={"schema:url": "https://example.org/"},
         )

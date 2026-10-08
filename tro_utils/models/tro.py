@@ -24,7 +24,7 @@ from .performance import (
     PerformanceAttribute,
     TrustedResearchPerformance,
 )
-from .trs import TrustedResearchSystem, validate_trs_id
+from .trs import TrustedResearchSystem, validate_capability_id, validate_trs_id
 from .tsa import TimeStampingAuthority
 
 TROV_VOCABULARY_VERSION = Version("0.1")
@@ -128,12 +128,35 @@ class TransparentResearchObject(TROVModel):
             filepath: Destination path (will be created/overwritten).
 
         Raises:
-            ValueError: If the TRS ``@id`` does not conform.  See
-                :func:`~tro_utils.models.trs.validate_trs_id`.
+            ValueError: If the TRS ``@id``, a capability ``@id``, or a
+                performance attribute's ``trov:warrantedBy`` does not conform.
+                See :func:`~tro_utils.models.trs.validate_trs_id` and
+                :func:`~tro_utils.models.trs.validate_capability_id`.
         """
         validate_trs_id(self.trs.trs_id, "TRS @id")
+        self._validate_capability_references()
         with open(filepath, "w") as f:
             json.dump(self.to_jsonld(), f, indent=2, sort_keys=True)
+
+    def _validate_capability_references(self) -> None:
+        """Check that capabilities, and the warrants pointing at them, conform.
+
+        A capability belongs to the TRS rather than to this declaration, so
+        both its own ``@id`` and every ``trov:warrantedBy`` that refers to it
+        have to name it the same way in any document -- a relative id resolves
+        against whichever document happens to contain it.
+        """
+        for capability in self.trs.capabilities:
+            validate_capability_id(
+                capability.capability_id,
+                f"capability @id for {capability.capability_type!r}",
+            )
+        for performance in self.performances:
+            for attribute in performance.attributes:
+                validate_capability_id(
+                    attribute.warranted_by_id,
+                    f"trov:warrantedBy of {attribute.attribute_id!r}",
+                )
 
     # ------------------------------------------------------------------
     # High-level mutation helpers

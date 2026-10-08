@@ -40,8 +40,14 @@ def trs_profile(tmp_path_factory):
     profile_data = {
         "rdfs:comment": "Test TRS for CLI testing",
         "trov:hasCapability": [
-            {"@id": "trs/capability/1", "@type": "trov:CanRecordInternetAccess"},
-            {"@id": "trs/capability/2", "@type": "trov:CanProvideInternetIsolation"},
+            {
+                "@id": "trov:CanRecordInternetAccess",
+                "@type": "trov:CanRecordInternetAccess",
+            },
+            {
+                "@id": "trov:CanProvideInternetIsolation",
+                "@type": "trov:CanProvideInternetIsolation",
+            },
         ],
     }
     profile_file.write_text(json.dumps(profile_data, indent=2))

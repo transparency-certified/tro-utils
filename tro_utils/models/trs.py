@@ -33,6 +33,22 @@ _IRI_RE = re.compile(r"^(?P<prefix>[A-Za-z][A-Za-z0-9+.\-]*):(?P<rest>.+)$")
 _RESERVED_PREFIX = "trov"
 
 
+def iri_prefix(value: Any) -> str | None:
+    """Return the scheme/prefix of *value*, or ``None`` if it is not an IRI.
+
+    Args:
+        value: A candidate ``@id``.
+
+    Returns:
+        The part before the first colon, or ``None`` when *value* is a
+        relative reference, a blank node, or not a string at all.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _IRI_RE.match(value)
+    return match.group("prefix") if match else None
+
+
 def is_conforming_trs_id(value: Any) -> bool:
     """Return whether *value* may identify a TRS.
 
@@ -46,10 +62,52 @@ def is_conforming_trs_id(value: Any) -> bool:
     Returns:
         ``True`` when *value* conforms.
     """
-    if not isinstance(value, str):
-        return False
-    match = _IRI_RE.match(value)
-    return match is not None and match.group("prefix") != _RESERVED_PREFIX
+    prefix = iri_prefix(value)
+    return prefix is not None and prefix != _RESERVED_PREFIX
+
+
+def is_conforming_capability_id(value: Any) -> bool:
+    """Return whether *value* may identify a TRS capability.
+
+    A capability belongs to the TRS rather than to any one declaration, so it
+    has to be named the same way everywhere: an absolute IRI or a compact IRI.
+    Unlike a TRS ``@id``, the ``trov`` prefix is allowed here -- the usual
+    identifier for a capability *is* its vocabulary term, e.g.
+    ``trov:CanRecordInternetAccess``.
+
+    Args:
+        value: A candidate ``@id``.
+
+    Returns:
+        ``True`` when *value* conforms.
+    """
+    return iri_prefix(value) is not None
+
+
+def validate_capability_id(value: Any, source: str = "capability @id") -> str:
+    """Return *value* unchanged, or raise if it cannot identify a capability.
+
+    Args:
+        value: The candidate ``@id``.
+        source: Label for the error message.
+
+    Returns:
+        *value*.
+
+    Raises:
+        ValueError: If *value* does not conform.  See
+            :func:`is_conforming_capability_id`.
+    """
+    if is_conforming_capability_id(value):
+        return value
+    raise ValueError(
+        f"{source} must be an absolute IRI or a compact IRI -- usually the "
+        f"capability's own term, e.g. 'trov:CanRecordInternetAccess' -- so "
+        f"that trov:warrantedBy refers to the same capability wherever it is "
+        f"mentioned; got {value!r}. A relative id such as 'trs/capability/1' "
+        f"resolves against whichever document contains it. Omit @id to use "
+        f"the capability's @type."
+    )
 
 
 def validate_trs_id(value: Any, source: str = "TRS @id") -> str:
@@ -77,10 +135,46 @@ def validate_trs_id(value: Any, source: str = "TRS @id") -> str:
 
 @dataclass
 class TRSCapability(TROVModel):
-    """A single capability declared by a :class:`TrustedResearchSystem`."""
+    """A single capability declared by a :class:`TrustedResearchSystem`.
+
+    The ``@id`` is what ``trov:warrantedBy`` points at from a performance
+    attribute, so it has to name the same capability in every declaration --
+    see :func:`is_conforming_capability_id`.  A profile that states no ``@id``
+    gets the capability's own term, which is the usual identifier for it.
+    """
 
     capability_id: str
     capability_type: str
+
+    # ------------------------------------------------------------------
+    # Convenience constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_profile_entry(cls, data: dict[str, Any]) -> "TRSCapability":
+        """Build a capability from one ``trov:hasCapability`` profile entry.
+
+        Args:
+            data: Dict with ``@type`` and an optional ``@id``.
+
+        Returns:
+            :class:`TRSCapability` identified by its stated ``@id``, or by its
+            ``@type`` when none is stated.
+
+        Raises:
+            ValueError: If a stated ``@id`` cannot identify a capability, or if
+                the entry has no usable ``@type``.
+        """
+        capability_type = data["@type"]
+        if "@id" in data:
+            capability_id = validate_capability_id(
+                data["@id"], "TRS profile capability @id"
+            )
+        else:
+            capability_id = validate_capability_id(
+                capability_type, "TRS profile capability @type"
+            )
+        return cls(capability_id=capability_id, capability_type=capability_type)
 
     # ------------------------------------------------------------------
     # JSON-LD serialisation
@@ -94,6 +188,12 @@ class TRSCapability(TROVModel):
 
     @classmethod
     def from_jsonld(cls, data: dict[str, Any]) -> "TRSCapability":
+        """Deserialise from a declaration, permissively.
+
+        Declarations written before capabilities were named by a conforming
+        IRI carry a relative ``@id``; they have to stay loadable, so nothing
+        is validated here.  :meth:`from_profile_entry` is the checked path.
+        """
         return cls(
             capability_id=data["@id"],
             capability_type=data["@type"],
@@ -149,7 +249,7 @@ class TrustedResearchSystem(TROVModel):
             ValueError: If the resolved identifier does not conform.
         """
         capabilities = [
-            TRSCapability.from_jsonld(cap)
+            TRSCapability.from_profile_entry(cap)
             for cap in profile.get("trov:hasCapability", [])
         ]
         extra = {k: v for k, v in profile.items() if k not in _KNOWN_TRS_KEYS}

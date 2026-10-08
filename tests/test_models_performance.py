@@ -15,7 +15,9 @@ class TestPerformanceAttribute:
 
     def test_to_from_jsonld(self):
         attr = PerformanceAttribute(
-            "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"
+            "trp/0/attribute/0",
+            "trov:InternetIsolation",
+            "trov:CanProvideInternetIsolation",
         )
         jld = attr.to_jsonld()
         restored = PerformanceAttribute.from_jsonld(jld)
@@ -42,7 +44,9 @@ class TestTrustedResearchPerformance:
             ],
             attributes=[
                 PerformanceAttribute(
-                    "trp/0/attribute/0", "trov:InternetIsolation", "trs/cap/0"
+                    "trp/0/attribute/0",
+                    "trov:InternetIsolation",
+                    "trov:CanProvideInternetIsolation",
                 )
             ],
         )

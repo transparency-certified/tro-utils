@@ -81,8 +81,10 @@ def trs_profile(tmp_path_factory):
     profile_data = {
         "rdfs:comment": "Test TRS for testing purposes",
         "trov:hasCapability": [
-            {"@id": "trs/capability/1", "@type": "trov:CanRecordInternetAccess"},
-            {"@id": "trs/capability/2", "@type": "trov:CanProvideInternetIsolation"},
+            # No @id: a capability is identified by its own term, which is
+            # what trov:warrantedBy has to point at.
+            {"@type": "trov:CanRecordInternetAccess"},
+            {"@type": "trov:CanProvideInternetIsolation"},
         ],
         # The TRS is a schema:Organization, so schema.org properties describe
         # it; trov:owner/contact/url/name were never TROV terms.
