@@ -89,7 +89,7 @@ class ArtifactArrangement(TROVModel):
             comment = f"Scanned {directory}"
 
         directory = pathlib.Path(directory)
-        magic_wrapper = magic.Magic(mime=True, uncompress=True)
+        magic_wrapper = magic.Magic(mime=True, uncompress=False)
 
         # Collect the file list first, then sort by relative path.  os.walk
         # yields entries in filesystem order, which differs between machines;
