@@ -59,7 +59,7 @@ class ResearchArtifact(TROVModel):
         if p.is_symlink():
             mime_type = "inode/symlink"
         else:
-            magic_wrapper = magic.Magic(mime=True, uncompress=True)
+            magic_wrapper = magic.Magic(mime=True, uncompress=False)
             mime_type = magic_wrapper.from_file(str(p)) or "application/octet-stream"
 
         return cls(artifact_id=artifact_id, hash=hash_value, mime_type=mime_type)
