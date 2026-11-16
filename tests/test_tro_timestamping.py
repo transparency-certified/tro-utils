@@ -2,8 +2,14 @@
 
 import json
 import os
+import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+from click.testing import CliRunner
+
+from tro_utils import __version__
+from tro_utils.cli import cli
 from tro_utils.tro_utils import TRO
 
 from tests.helpers import create_tro_with_gpg
@@ -165,3 +171,102 @@ class TestTROTimestamping:
         TRO(filepath=declaration).verify_timestamp()
 
         assert verified_payload["data"] == signed_payload
+
+
+def _saved_tro(tmp_path, trs_profile, created_with):
+    """Save a TRO whose ``trov:createdWith`` is replaced by *created_with*."""
+    declaration = tmp_path / "test_tro.jsonld"
+    TRO(filepath=str(declaration), profile=trs_profile).save()
+    data = json.loads(declaration.read_text())
+    if created_with is None:
+        data["@graph"][0].pop("trov:createdWith", None)
+    else:
+        data["@graph"][0]["trov:createdWith"] = created_with
+    declaration.write_text(json.dumps(data, indent=2, sort_keys=True))
+    (tmp_path / "test_tro.sig").write_bytes(b"fake sig data")
+    (tmp_path / "test_tro.tsr").write_bytes(b"fake tsr data")
+    return TRO(filepath=str(declaration))
+
+
+def _created_with(version):
+    return {
+        "@type": "schema:SoftwareApplication",
+        "schema:name": "tro-utils",
+        "schema:softwareVersion": version,
+    }
+
+
+class TestCreatedWithMismatch:
+    """verify_timestamp should explain failures caused by a version mismatch."""
+
+    def test_no_mismatch_for_current_version(self, tmp_path, trs_profile):
+        tro = TRO(filepath=str(tmp_path / "test_tro.jsonld"), profile=trs_profile)
+        assert tro.created_with_mismatch() is None
+
+    def test_mismatch_for_other_version(self, tmp_path, trs_profile):
+        tro = _saved_tro(tmp_path, trs_profile, _created_with("0.4.5"))
+        mismatch = tro.created_with_mismatch()
+        assert "tro-utils 0.4.5" in mismatch
+        assert "pip install tro-utils==0.4.5" in mismatch
+
+    def test_mismatch_for_other_software(self, tmp_path, trs_profile):
+        created_with = {"schema:name": "other-tool", "schema:softwareVersion": "1.0"}
+        tro = _saved_tro(tmp_path, trs_profile, created_with)
+        mismatch = tro.created_with_mismatch()
+        assert "other-tool 1.0" in mismatch
+        assert "pip install" not in mismatch
+
+    def test_mismatch_when_created_with_missing(self, tmp_path, trs_profile):
+        tro = _saved_tro(tmp_path, trs_profile, None)
+        assert "no trov:createdWith" in tro.created_with_mismatch()
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    def test_failure_names_creating_version(
+        self, mock_get, mock_check_call, tmp_path, trs_profile
+    ):
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+        mock_check_call.side_effect = subprocess.CalledProcessError(1, "openssl")
+        tro = _saved_tro(tmp_path, trs_profile, _created_with("0.4.5"))
+
+        with pytest.raises(RuntimeError, match="tro-utils==0.4.5"):
+            tro.verify_timestamp()
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    def test_failure_without_mismatch_is_unchanged(
+        self, mock_get, mock_check_call, tmp_path, trs_profile
+    ):
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+        mock_check_call.side_effect = subprocess.CalledProcessError(1, "openssl")
+        tro = _saved_tro(tmp_path, trs_profile, _created_with(__version__))
+
+        with pytest.raises(subprocess.CalledProcessError):
+            tro.verify_timestamp()
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    def test_cli_warns_on_mismatch(
+        self, mock_get, mock_check_call, tmp_path, trs_profile
+    ):
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+        tro = _saved_tro(tmp_path, trs_profile, _created_with("0.4.5"))
+
+        result = CliRunner().invoke(cli, ["verify-timestamp", tro.tro_filename])
+
+        assert result.exit_code == 0
+        assert "Warning: The TRO was created with tro-utils 0.4.5" in result.output
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    def test_cli_reports_failure_with_version(
+        self, mock_get, mock_check_call, tmp_path, trs_profile
+    ):
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+        mock_check_call.side_effect = subprocess.CalledProcessError(1, "openssl")
+        tro = _saved_tro(tmp_path, trs_profile, _created_with("0.4.5"))
+
+        result = CliRunner().invoke(cli, ["verify-timestamp", tro.tro_filename])
+
+        assert result.exit_code == 1
+        assert "pip install tro-utils==0.4.5" in result.output

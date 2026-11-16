@@ -276,6 +276,35 @@ class TRO:
     def get_composition_info(self):
         return self.data["@graph"][0]["trov:hasComposition"]
 
+    def created_with_mismatch(self):
+        """Explain why this TRO may not verify with the running tro-utils.
+
+        tro-utils makes no backward-compatibility guarantee, so a TRO is only
+        guaranteed to verify with the version recorded in ``trov:createdWith``.
+
+        Returns:
+            A human-readable message if the TRO was created by different
+            software or a different tro-utils version, otherwise ``None``.
+        """
+        name = self._model.created_with_name
+        version = self._model.created_with_version
+        if name == "tro-utils" and version == __version__:
+            return None
+        if not name and not version:
+            return (
+                "The TRO does not record which software created it "
+                "(no trov:createdWith); it may not verify with "
+                f"tro-utils {__version__}."
+            )
+        created = " ".join(filter(None, [name or "unknown software", version]))
+        msg = (
+            f"The TRO was created with {created}, but this is "
+            f"tro-utils {__version__}."
+        )
+        if name == "tro-utils" and version:
+            msg += f" Verify it with: pip install tro-utils=={version}"
+        return msg
+
     def verify_timestamp(self):
         """Verify that a run is valid and signed."""
 
@@ -329,7 +358,15 @@ class TRO:
                 "-untrusted",
                 tsacert_f.name,
             ]
-            subprocess.check_call(args)
+            try:
+                subprocess.check_call(args)
+            except subprocess.CalledProcessError as err:
+                mismatch = self.created_with_mismatch()
+                if mismatch is None:
+                    raise
+                raise RuntimeError(
+                    f"Timestamp verification failed. {mismatch}"
+                ) from err
 
     # ------------------------------------------------------------------
     # Replication package verification
