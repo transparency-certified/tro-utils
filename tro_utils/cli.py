@@ -178,7 +178,13 @@ def verify_timestamp(declaration):
     tro = TRO(
         filepath=declaration,
     )
-    tro.verify_timestamp()
+    mismatch = tro.created_with_mismatch()
+    if mismatch:
+        click.secho(f"Warning: {mismatch}", fg="yellow", err=True)
+    try:
+        tro.verify_timestamp()
+    except RuntimeError as err:
+        raise click.ClickException(str(err)) from err
 
 
 @cli.command(help="Verify the integrity of the TRO")
