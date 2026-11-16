@@ -14,6 +14,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+from dataclasses import dataclass
 
 from jinja2 import Template
 import requests
@@ -27,6 +28,24 @@ from .models.agent import ORGANIZATION, Agent
 from .models.trs import TrustedResearchSystem
 
 GPG_HOME = os.environ.get("GPG_HOME")
+
+
+@dataclass
+class SignatureVerification:
+    """Result of :meth:`TRO.verify_signature`."""
+
+    valid: bool
+    status: str
+    fingerprint: str | None
+    username: str | None = None
+    trust: str | None = None
+    used_embedded_key: bool = False
+    embedded_key_matches: bool | None = None
+
+    @property
+    def key_missing(self) -> bool:
+        """``True`` when the signing key is not in the keyring used."""
+        return self.status == "no public key"
 
 
 class TRO:
@@ -386,6 +405,78 @@ class TRO:
                 raise RuntimeError(
                     f"Timestamp verification failed. {mismatch}"
                 ) from err
+
+    def verify_signature(self, use_embedded_key=False, gnupghome=None):
+        """Verify the TRS signature against the declaration as stored on disk.
+
+        The signing key is looked up in the verifier's keyring: tro-utils does
+        not decide how a TRS key comes to be trusted. The ``trov:publicKey``
+        embedded in the TRO is only attested by the TRO itself, so it is used
+        for verification only when explicitly requested.
+
+        Args:
+            use_embedded_key: Verify with a throwaway keyring holding only the
+                key embedded in the TRO instead of the verifier's keyring.
+            gnupghome: GnuPG home of the keyring to use; defaults to
+                ``GPG_HOME`` or GnuPG's own default.
+
+        Returns:
+            A :class:`SignatureVerification`.
+        """
+        import gnupg
+
+        if not os.path.exists(self.sig_filename):
+            raise RuntimeError("Signature file does not exist")
+        with open(self.tro_filename, "rb") as fp:
+            declaration = fp.read()
+        public_key = self._model.trs.public_key
+
+        with tempfile.TemporaryDirectory() as tmp_home:
+            if use_embedded_key:
+                if not public_key:
+                    raise RuntimeError("The TRO does not embed a public key")
+                gpg = gnupg.GPG(gnupghome=tmp_home)
+                gpg.import_keys(public_key)
+            elif gnupghome is not None:
+                gpg = gnupg.GPG(gnupghome=gnupghome)
+            else:
+                gpg = self._gpg()
+
+            result = gpg.verify_data(self.sig_filename, declaration)
+            embedded = set()
+            if public_key:
+                for key in gpg.scan_keys_mem(public_key):
+                    embedded.add(key["fingerprint"])
+                    embedded.update(s[2] for s in key.get("subkeys", []) if s[2])
+
+        fingerprint = (
+            getattr(result, "pubkey_fingerprint", None)
+            or result.fingerprint
+            or result.key_id
+        )
+        # gpg reports VALIDSIG after EXPKEYSIG/REVKEYSIG, which overwrites
+        # status with "signature valid"; key_status keeps the reason.
+        status = result.key_status or result.status or "signature error"
+        valid = bool(result.valid)
+        if result.trust_level == result.TRUST_NEVER:
+            valid = False
+            status = "signing key is marked as never trusted"
+        # Before GnuPG 2.2.7 a missing key is reported by key ID only, which is
+        # the tail of its fingerprint.
+        signer = {result.fingerprint, fingerprint} - {None}
+        return SignatureVerification(
+            valid=valid,
+            status=status,
+            fingerprint=fingerprint,
+            username=result.username,
+            trust=result.trust_text if valid else None,
+            used_embedded_key=use_embedded_key,
+            embedded_key_matches=(
+                any(fp.endswith(s) for fp in embedded for s in signer)
+                if embedded
+                else None
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Replication package verification

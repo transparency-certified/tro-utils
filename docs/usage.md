@@ -79,7 +79,18 @@ the default `schema:creator` reference.
 ```
 tro-utils verify-timestamp <declaration>
 ```
-Verifies the RFC 3161 timestamp and GPG signature on the TRO.
+Verifies the RFC 3161 timestamp on the TRO.
+
+```
+tro-utils verify-signature <declaration> [--gnupghome DIR] [--use-embedded-key]
+```
+Verifies the TRS's GPG signature against the declaration as stored on disk.
+The signing key must already be in your keyring (or in `--gnupghome`): how a
+TRS key comes to be trusted (the TRS's website, a registry, a fingerprint
+published by a journal) is up to you, so tro-utils does not trust the
+`trov:publicKey` embedded in the TRO. If the key is missing, the command fails
+and prints its fingerprint. `--use-embedded-key` verifies with the embedded key
+instead, which only shows that the TRO is self-consistent, not who signed it.
 
 ```
 tro-utils verify-package <declaration> <package> [-a ARRANGEMENT] [-s SUBPATH] [-v]
@@ -340,6 +351,7 @@ for p in tro.list_performances():
 tro.save()
 tro.request_timestamp()
 tro.verify_timestamp()   # needs neither a key nor the gpg binary
+tro.verify_signature()   # needs the TRS's key in your keyring
 
 # Verify a replication package
 result = tro.verify_replication_package(

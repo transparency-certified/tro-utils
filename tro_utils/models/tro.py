@@ -135,7 +135,9 @@ class TransparentResearchObject(TROVModel):
         """
         validate_trs_id(self.trs.trs_id, "TRS @id")
         self._validate_capability_references()
-        with open(filepath, "w") as f:
+        # The signature covers the LF-terminated serialization, so keep it
+        # byte-for-byte on disk on every platform.
+        with open(filepath, "w", newline="\n") as f:
             json.dump(self.to_jsonld(), f, indent=2, sort_keys=True)
 
     def _validate_capability_references(self) -> None:

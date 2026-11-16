@@ -172,7 +172,9 @@ def cli(
     pass
 
 
-@cli.command(help="Verify that TRO is signed and timestamped correctly")
+@cli.command(
+    help="Verify the TRO's timestamp (use verify-signature to check its signature)"
+)
 @click.argument("declaration", type=click.Path(exists=True))
 def verify_timestamp(declaration):
     tro = TRO(
@@ -185,6 +187,70 @@ def verify_timestamp(declaration):
         tro.verify_timestamp()
     except RuntimeError as err:
         raise click.ClickException(str(err)) from err
+
+
+@cli.command(
+    name="verify-signature",
+    help="Verify the TRS signature of the TRO against your GPG keyring",
+)
+@click.argument("declaration", type=click.Path(exists=True))
+@click.option(
+    "--use-embedded-key",
+    is_flag=True,
+    help="Verify with the public key embedded in the TRO instead of your "
+    "keyring. This only shows the TRO is self-consistent, not who signed it.",
+)
+@click.option(
+    "--gnupghome",
+    type=click.Path(exists=True, file_okay=False),
+    help="GnuPG home directory holding the keys you trust",
+)
+def verify_signature(declaration, use_embedded_key, gnupghome):
+    tro = TRO(filepath=declaration)
+    try:
+        result = tro.verify_signature(
+            use_embedded_key=use_embedded_key, gnupghome=gnupghome
+        )
+    except RuntimeError as err:
+        raise click.ClickException(str(err)) from err
+
+    if result.key_missing and result.used_embedded_key:
+        raise click.ClickException(
+            "The public key embedded in the TRO (trov:publicKey) did not sign "
+            f"it; the signing key is {result.fingerprint}."
+        )
+    if result.key_missing:
+        raise click.ClickException(
+            f"Signing key {result.fingerprint} is not in your keyring. Obtain "
+            "the TRS's public key from a source you trust and import it with "
+            "'gpg --import', or use --use-embedded-key to check only that the "
+            "TRO is self-consistent."
+        )
+    if not result.valid:
+        raise click.ClickException(
+            f"Signature verification failed: {result.status} "
+            f"(key {result.fingerprint})"
+        )
+
+    click.secho("Signature: OK", fg="green")
+    click.echo(f"Signed by: {result.username}")
+    click.echo(f"Key fingerprint: {result.fingerprint}")
+    if result.used_embedded_key:
+        click.secho(
+            "Warning: verified with the key embedded in the TRO; the key is "
+            "attested only by the TRO itself.",
+            fg="yellow",
+            err=True,
+        )
+    else:
+        click.echo(f"Key trust: {result.trust}")
+    if result.embedded_key_matches is False:
+        click.secho(
+            "Warning: the public key embedded in the TRO (trov:publicKey) is "
+            "not the key that signed it.",
+            fg="yellow",
+            err=True,
+        )
 
 
 @cli.command(help="Verify the integrity of the TRO")
