@@ -1,6 +1,7 @@
 """Tests for verifying the TRS signature of a TRO."""
 
 import json
+import pathlib
 from unittest.mock import MagicMock, patch
 
 import gnupg
@@ -8,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from tro_utils.cli import cli
-from tro_utils.tro_utils import TRO
+from tro_utils.tro_utils import TRO, _kill_gpg_agent
 
 from tests.helpers import create_tro_with_gpg
 
@@ -36,7 +37,8 @@ def signed_tro(tmp_path, temp_workspace, gpg_setup, trs_profile):
 def empty_keyring(tmp_path):
     home = tmp_path / "empty_gnupg"
     home.mkdir(mode=0o700)
-    return str(home)
+    yield str(home)
+    _kill_gpg_agent(str(home))
 
 
 @pytest.fixture
@@ -54,7 +56,8 @@ def other_key(tmp_path_factory):
             no_protection=True,
         )
     )
-    return gpg.export_keys(str(key))
+    yield gpg.export_keys(str(key))
+    _kill_gpg_agent(str(home))
 
 
 @pytest.fixture
@@ -80,7 +83,8 @@ def expired_key_tro(tmp_path, trs_profile):
     TRO(filepath=str(declaration), profile=trs_profile).save()
     signature = gpg.sign(declaration.read_bytes(), keyid=str(key), detach=True)
     (tmp_path / "test_tro.sig").write_text(str(signature))
-    return str(declaration), str(home)
+    yield str(declaration), str(home)
+    _kill_gpg_agent(str(home))
 
 
 @pytest.fixture
@@ -95,7 +99,19 @@ def never_trusted_keyring(tmp_path, gpg_setup):
     gpg = gnupg.GPG(gnupghome=str(home))
     gpg.import_keys(gpg_setup["gpg"].export_keys(gpg_setup["fingerprint"]))
     gpg.trust_keys(gpg_setup["fingerprint"], "TRUST_NEVER")
-    return str(home)
+    yield str(home)
+    _kill_gpg_agent(str(home))
+
+
+@pytest.fixture
+def uncertified_keyring(tmp_path, gpg_setup):
+    """A keyring holding the signing key, imported but never certified."""
+    home = tmp_path / "uncertified_gnupg"
+    home.mkdir(mode=0o700)
+    gpg = gnupg.GPG(gnupghome=str(home))
+    gpg.import_keys(gpg_setup["gpg"].export_keys(gpg_setup["fingerprint"]))
+    yield str(home)
+    _kill_gpg_agent(str(home))
 
 
 def _replace_embedded_key(declaration, public_key):
@@ -111,6 +127,7 @@ class TestVerifySignature:
         result = TRO(filepath=signed_tro).verify_signature()
 
         assert result.valid
+        assert result.trusted
         assert result.fingerprint == gpg_setup["fingerprint"]
         assert "Test User" in result.username
         assert not result.used_embedded_key
@@ -128,8 +145,39 @@ class TestVerifySignature:
             result = TRO(filepath=signed_tro).verify_signature(use_embedded_key=True)
 
         assert result.valid
+        assert not result.trusted
         assert result.used_embedded_key
         assert result.fingerprint == gpg_setup["fingerprint"]
+
+    def test_embedded_key_stops_agent(self, signed_tro):
+        """The throwaway keyring's gpg-agent is stopped before it is removed."""
+        with patch("tro_utils.tro_utils._kill_gpg_agent") as kill:
+            TRO(filepath=signed_tro).verify_signature(use_embedded_key=True)
+
+        kill.assert_called_once()
+
+    def test_uncertified_key(self, signed_tro, uncertified_keyring):
+        """A key that is only present in the keyring is not trusted."""
+        result = TRO(filepath=signed_tro).verify_signature(
+            gnupghome=uncertified_keyring
+        )
+
+        assert result.valid
+        assert not result.trusted
+
+    def test_no_auto_key_retrieve(self, signed_tro):
+        """gpg must not fetch the signing key by the fingerprint in the .sig."""
+        options = []
+        verify_data = gnupg.GPG.verify_data
+
+        def spy(gpg, *args, **kwargs):
+            options.extend(gpg.options)
+            return verify_data(gpg, *args, **kwargs)
+
+        with patch.object(gnupg.GPG, "verify_data", spy):
+            TRO(filepath=signed_tro).verify_signature()
+
+        assert "--no-auto-key-retrieve" in options
 
     def test_tampered_declaration(self, signed_tro):
         with open(signed_tro, "a") as fp:
@@ -209,6 +257,43 @@ class TestVerifySignatureCLI:
         assert gpg_setup["fingerprint"] in result.output
         assert "Key trust:" in result.output
         assert "Warning" not in result.output
+
+    def test_uncertified_key_warns(self, signed_tro, gpg_setup, uncertified_keyring):
+        result = self._run(signed_tro, "--gnupghome", uncertified_keyring)
+
+        assert result.exit_code == 0, result.output
+        assert "Signature: OK" in result.output
+        assert "you have not certified it" in result.output
+        assert f"gpg --lsign-key {gpg_setup['fingerprint']}" in result.output
+
+    def test_not_a_jsonld_file(self, signed_tro, tmp_path):
+        other = tmp_path / "test_tro.json"
+        other.write_text(pathlib.Path(signed_tro).read_text())
+
+        result = self._run(str(other))
+
+        assert result.exit_code == 2
+        assert "expected a .jsonld declaration" in result.output
+
+    def test_unreadable_declaration(self, signed_tro):
+        data = json.loads(pathlib.Path(signed_tro).read_text())
+        data["@graph"][0]["trov:vocabularyVersion"] = "0.0.1"
+        pathlib.Path(signed_tro).write_text(json.dumps(data))
+
+        result = self._run(signed_tro)
+
+        assert result.exit_code == 1
+        assert "older version of the TRO vocabulary" in result.output
+        assert isinstance(result.exception, SystemExit)  # no traceback
+
+    def test_corrupt_signature(self, signed_tro, tmp_path):
+        (tmp_path / "test_tro.sig").write_text("not a signature\n")
+
+        result = self._run(signed_tro)
+
+        assert result.exit_code == 1
+        assert "Signature verification failed" in result.output
+        assert "(key None)" not in result.output
 
     def test_key_missing(self, signed_tro, gpg_setup, empty_keyring):
         result = self._run(signed_tro, "--gnupghome", empty_keyring)

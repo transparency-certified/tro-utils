@@ -206,12 +206,19 @@ def verify_timestamp(declaration):
     help="GnuPG home directory holding the keys you trust",
 )
 def verify_signature(declaration, use_embedded_key, gnupghome):
-    tro = TRO(filepath=declaration)
+    # TRO derives the .sig path from the stem and always reads <stem>.jsonld,
+    # so any other name would verify a different file than the one given.
+    if pathlib.Path(declaration).suffix != ".jsonld":
+        raise click.BadParameter(
+            f"expected a .jsonld declaration, got {declaration!r}",
+            param_hint="DECLARATION",
+        )
     try:
+        tro = TRO(filepath=declaration)
         result = tro.verify_signature(
             use_embedded_key=use_embedded_key, gnupghome=gnupghome
         )
-    except RuntimeError as err:
+    except (RuntimeError, ValueError, OSError) as err:
         raise click.ClickException(str(err)) from err
 
     if result.key_missing and result.used_embedded_key:
@@ -227,9 +234,9 @@ def verify_signature(declaration, use_embedded_key, gnupghome):
             "TRO is self-consistent."
         )
     if not result.valid:
+        key = f" (key {result.fingerprint})" if result.fingerprint else ""
         raise click.ClickException(
-            f"Signature verification failed: {result.status} "
-            f"(key {result.fingerprint})"
+            f"Signature verification failed: {result.status}{key}"
         )
 
     click.secho("Signature: OK", fg="green")
@@ -244,6 +251,15 @@ def verify_signature(declaration, use_embedded_key, gnupghome):
         )
     else:
         click.echo(f"Key trust: {result.trust}")
+        if not result.trusted:
+            click.secho(
+                "Warning: the signing key is in your keyring, but you have not "
+                "certified it. Confirm its fingerprint against a source you "
+                "trust, such as the TRS's website, then certify it with "
+                f"'gpg --lsign-key {result.fingerprint}'.",
+                fg="yellow",
+                err=True,
+            )
     if result.embedded_key_matches is False:
         click.secho(
             "Warning: the public key embedded in the TRO (trov:publicKey) is "

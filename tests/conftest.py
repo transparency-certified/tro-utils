@@ -5,6 +5,7 @@ import json
 import gnupg
 import pytest
 
+from tro_utils.tro_utils import _kill_gpg_agent
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -64,13 +65,14 @@ def gpg_setup(tmp_path_factory):
             keyid = k["keyid"]
             break
 
-    return {
+    yield {
         "gpg_home": str(gpg_home),
         "gpg": gpg,
         "fingerprint": fingerprint,
         "keyid": keyid,
         "passphrase": "test_passphrase",
     }
+    _kill_gpg_agent(str(gpg_home))
 
 
 @pytest.fixture(scope="session")

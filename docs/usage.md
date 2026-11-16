@@ -89,7 +89,9 @@ The signing key must already be in your keyring (or in `--gnupghome`): how a
 TRS key comes to be trusted (the TRS's website, a registry, a fingerprint
 published by a journal) is up to you, so tro-utils does not trust the
 `trov:publicKey` embedded in the TRO. If the key is missing, the command fails
-and prints its fingerprint. `--use-embedded-key` verifies with the embedded key
+and prints its fingerprint; GnuPG is not allowed to fetch it by itself. If the
+key is in your keyring but you have not certified it (`gpg --lsign-key`), the
+command warns. `--use-embedded-key` verifies with the embedded key
 instead, which only shows that the TRO is self-consistent, not who signed it.
 
 ```

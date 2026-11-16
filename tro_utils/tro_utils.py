@@ -29,6 +29,22 @@ from .models.trs import TrustedResearchSystem
 
 GPG_HOME = os.environ.get("GPG_HOME")
 
+# A key gpg fetches by itself, from a key server or a URL in the signature,
+# is found by the fingerprint the signer chose, so it vouches for nothing.
+_VERIFY_OPTIONS = ["--no-auto-key-retrieve"]
+
+
+def _kill_gpg_agent(gnupghome):
+    """Stop the gpg-agent serving *gnupghome*, which would outlive its removal."""
+    try:
+        subprocess.run(
+            ["gpgconf", "--homedir", gnupghome, "--kill", "all"],
+            check=False,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass
+
 
 @dataclass
 class SignatureVerification:
@@ -39,6 +55,9 @@ class SignatureVerification:
     fingerprint: str | None
     username: str | None = None
     trust: str | None = None
+    #: Whether the keyring vouches for the key (at least marginal validity).
+    #: A key that is merely present in the keyring does not.
+    trusted: bool = False
     used_embedded_key: bool = False
     embedded_key_matches: bool | None = None
 
@@ -282,7 +301,8 @@ class TRO:
             passphrase=self.gpg_passphrase,
             detach=True,
         )
-        with open(self.sig_filename, "w") as fp:
+        # The timestamp covers the LF-terminated signature, as for save().
+        with open(self.sig_filename, "w", newline="\n") as fp:
             fp.write(str(signature))
         return signature
 
@@ -431,23 +451,28 @@ class TRO:
             declaration = fp.read()
         public_key = self._model.trs.public_key
 
-        with tempfile.TemporaryDirectory() as tmp_home:
-            if use_embedded_key:
-                if not public_key:
-                    raise RuntimeError("The TRO does not embed a public key")
-                gpg = gnupg.GPG(gnupghome=tmp_home)
-                gpg.import_keys(public_key)
-            elif gnupghome is not None:
-                gpg = gnupg.GPG(gnupghome=gnupghome)
-            else:
-                gpg = self._gpg()
+        if use_embedded_key and not public_key:
+            raise RuntimeError("The TRO does not embed a public key")
 
-            result = gpg.verify_data(self.sig_filename, declaration)
-            embedded = set()
-            if public_key:
-                for key in gpg.scan_keys_mem(public_key):
-                    embedded.add(key["fingerprint"])
-                    embedded.update(s[2] for s in key.get("subkeys", []) if s[2])
+        with tempfile.TemporaryDirectory() as tmp_home:
+            try:
+                if use_embedded_key:
+                    gpg = gnupg.GPG(gnupghome=tmp_home, options=_VERIFY_OPTIONS)
+                    gpg.import_keys(public_key)
+                else:
+                    gpg = gnupg.GPG(
+                        gnupghome=gnupghome or GPG_HOME, options=_VERIFY_OPTIONS
+                    )
+
+                result = gpg.verify_data(self.sig_filename, declaration)
+                embedded = set()
+                if public_key:
+                    for key in gpg.scan_keys_mem(public_key):
+                        embedded.add(key["fingerprint"])
+                        embedded.update(s[2] for s in key.get("subkeys", []) if s[2])
+            finally:
+                if use_embedded_key:
+                    _kill_gpg_agent(tmp_home)
 
         fingerprint = (
             getattr(result, "pubkey_fingerprint", None)
@@ -470,6 +495,11 @@ class TRO:
             fingerprint=fingerprint,
             username=result.username,
             trust=result.trust_text if valid else None,
+            trusted=(
+                valid
+                and result.trust_level is not None
+                and result.trust_level >= result.TRUST_MARGINAL
+            ),
             used_embedded_key=use_embedded_key,
             embedded_key_matches=(
                 any(fp.endswith(s) for fp in embedded for s in signer)
