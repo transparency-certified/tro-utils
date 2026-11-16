@@ -10,7 +10,7 @@ from rich.table import Table
 from . import TRPAttribute
 from .models.arrangement import ArtifactArrangement
 from .models.composition import ArtifactComposition
-from .tro_utils import TRO
+from .tro_utils import TRO, normalize_fingerprint
 
 console = Console()
 
@@ -189,6 +189,13 @@ def verify_timestamp(declaration):
         raise click.ClickException(str(err)) from err
 
 
+def _normalize_fingerprints(ctx, param, values):
+    try:
+        return tuple(normalize_fingerprint(value) for value in values)
+    except ValueError as err:
+        raise click.BadParameter(str(err)) from err
+
+
 @cli.command(
     name="verify-signature",
     help="Verify the TRS signature of the TRO against your GPG keyring",
@@ -205,7 +212,25 @@ def verify_timestamp(declaration):
     type=click.Path(exists=True, file_okay=False),
     help="GnuPG home directory holding the keys you trust",
 )
-def verify_signature(declaration, use_embedded_key, gnupghome):
+@click.option(
+    "--keyring",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Key file (armored or binary), e.g. as published by the TRS, to "
+    "verify with instead of your keyring. Only the keys in it are used.",
+)
+@click.option(
+    "--fingerprint",
+    "fingerprints",
+    multiple=True,
+    callback=_normalize_fingerprints,
+    help="Full fingerprint the signing key must have, e.g. as published by "
+    "the TRS. Can be given more than once.",
+)
+def verify_signature(declaration, use_embedded_key, gnupghome, keyring, fingerprints):
+    if use_embedded_key + bool(gnupghome) + bool(keyring) > 1:
+        raise click.UsageError(
+            "--use-embedded-key, --gnupghome and --keyring are mutually exclusive"
+        )
     # TRO derives the .sig path from the stem and always reads <stem>.jsonld,
     # so any other name would verify a different file than the one given.
     if pathlib.Path(declaration).suffix != ".jsonld":
@@ -216,7 +241,10 @@ def verify_signature(declaration, use_embedded_key, gnupghome):
     try:
         tro = TRO(filepath=declaration)
         result = tro.verify_signature(
-            use_embedded_key=use_embedded_key, gnupghome=gnupghome
+            use_embedded_key=use_embedded_key,
+            gnupghome=gnupghome,
+            keyring=keyring,
+            fingerprints=fingerprints,
         )
     except (RuntimeError, ValueError, OSError) as err:
         raise click.ClickException(str(err)) from err
@@ -225,6 +253,10 @@ def verify_signature(declaration, use_embedded_key, gnupghome):
         raise click.ClickException(
             "The public key embedded in the TRO (trov:publicKey) did not sign "
             f"it; the signing key is {result.fingerprint}."
+        )
+    if result.key_missing and result.keyring:
+        raise click.ClickException(
+            f"Signing key {result.fingerprint} is not in {result.keyring}."
         )
     if result.key_missing:
         raise click.ClickException(
@@ -242,24 +274,29 @@ def verify_signature(declaration, use_embedded_key, gnupghome):
     click.secho("Signature: OK", fg="green")
     click.echo(f"Signed by: {result.username}")
     click.echo(f"Key fingerprint: {result.fingerprint}")
-    if result.used_embedded_key:
+    if result.fingerprint_matches:
+        click.echo("Key confirmed by: the fingerprint you gave")
+    if result.keyring:
+        click.echo(f"Key found in: {result.keyring}")
+    elif not result.used_embedded_key:
+        click.echo(f"Key trust: {result.trust}")
+    if not result.trusted and result.used_embedded_key:
         click.secho(
             "Warning: verified with the key embedded in the TRO; the key is "
             "attested only by the TRO itself.",
             fg="yellow",
             err=True,
         )
-    else:
-        click.echo(f"Key trust: {result.trust}")
-        if not result.trusted:
-            click.secho(
-                "Warning: the signing key is in your keyring, but you have not "
-                "certified it. Confirm its fingerprint against a source you "
-                "trust, such as the TRS's website, then certify it with "
-                f"'gpg --lsign-key {result.fingerprint}'.",
-                fg="yellow",
-                err=True,
-            )
+    elif not result.trusted:
+        click.secho(
+            "Warning: the signing key is in your keyring, but you have not "
+            "certified it. Confirm its fingerprint against a source you "
+            "trust, such as the TRS's website, then certify it with "
+            f"'gpg --lsign-key {result.fingerprint}' or pass it with "
+            "--fingerprint.",
+            fg="yellow",
+            err=True,
+        )
     if result.embedded_key_matches is False:
         click.secho(
             "Warning: the public key embedded in the TRO (trov:publicKey) is "

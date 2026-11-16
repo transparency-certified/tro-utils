@@ -55,16 +55,39 @@ class SignatureVerification:
     fingerprint: str | None
     username: str | None = None
     trust: str | None = None
-    #: Whether the keyring vouches for the key (at least marginal validity).
-    #: A key that is merely present in the keyring does not.
+    #: Whether something other than the TRO vouches for the key: an expected
+    #: fingerprint it matched, a keyring file it was found in, or at least
+    #: marginal validity in the keyring. Mere presence in the keyring does not.
     trusted: bool = False
     used_embedded_key: bool = False
     embedded_key_matches: bool | None = None
+    #: The keyring file the key was looked up in, if one was given.
+    keyring: str | None = None
+    #: Whether the key matched an expected fingerprint; ``None`` if none given.
+    fingerprint_matches: bool | None = None
 
     @property
     def key_missing(self) -> bool:
         """``True`` when the signing key is not in the keyring used."""
         return self.status == "no public key"
+
+
+def normalize_fingerprint(value):
+    """Return *value* as an upper-case hex fingerprint without spaces.
+
+    Raises:
+        ValueError: If *value* is not a full v4 (40 hex digits) or v5/v6 (64)
+            fingerprint. A key ID is the tail of a fingerprint and is too
+            short to identify a key safely, so it is refused.
+    """
+    fingerprint = "".join(value.split()).upper()
+    if fingerprint.startswith("0X"):
+        fingerprint = fingerprint[2:]
+    if len(fingerprint) not in (40, 64) or any(
+        c not in "0123456789ABCDEF" for c in fingerprint
+    ):
+        raise ValueError(f"{value!r} is not a full OpenPGP key fingerprint")
+    return fingerprint
 
 
 class TRO:
@@ -426,7 +449,9 @@ class TRO:
                     f"Timestamp verification failed. {mismatch}"
                 ) from err
 
-    def verify_signature(self, use_embedded_key=False, gnupghome=None):
+    def verify_signature(
+        self, use_embedded_key=False, gnupghome=None, keyring=None, fingerprints=None
+    ):
         """Verify the TRS signature against the declaration as stored on disk.
 
         The signing key is looked up in the verifier's keyring: tro-utils does
@@ -439,12 +464,22 @@ class TRO:
                 key embedded in the TRO instead of the verifier's keyring.
             gnupghome: GnuPG home of the keyring to use; defaults to
                 ``GPG_HOME`` or GnuPG's own default.
+            keyring: A key file (armored or binary) to verify with instead,
+                through a throwaway keyring holding only the keys in it.
+            fingerprints: Fingerprints the signing key is expected to have,
+                e.g. as published by the TRS. A signature by any other key is
+                reported as invalid.
 
         Returns:
             A :class:`SignatureVerification`.
         """
         import gnupg
 
+        if use_embedded_key + bool(gnupghome) + bool(keyring) > 1:
+            raise ValueError(
+                "use_embedded_key, gnupghome and keyring are mutually exclusive"
+            )
+        expected = {normalize_fingerprint(fp) for fp in fingerprints or ()}
         if not os.path.exists(self.sig_filename):
             raise RuntimeError("Signature file does not exist")
         with open(self.tro_filename, "rb") as fp:
@@ -454,11 +489,18 @@ class TRO:
         if use_embedded_key and not public_key:
             raise RuntimeError("The TRO does not embed a public key")
 
+        throwaway = use_embedded_key or keyring is not None
         with tempfile.TemporaryDirectory() as tmp_home:
             try:
-                if use_embedded_key:
+                if throwaway:
                     gpg = gnupg.GPG(gnupghome=tmp_home, options=_VERIFY_OPTIONS)
-                    gpg.import_keys(public_key)
+                    imported = (
+                        gpg.import_keys(public_key)
+                        if use_embedded_key
+                        else gpg.import_keys_file(keyring)
+                    )
+                    if keyring is not None and not imported.fingerprints:
+                        raise RuntimeError(f"No public keys found in {keyring}")
                 else:
                     gpg = gnupg.GPG(
                         gnupghome=gnupghome or GPG_HOME, options=_VERIFY_OPTIONS
@@ -471,7 +513,7 @@ class TRO:
                         embedded.add(key["fingerprint"])
                         embedded.update(s[2] for s in key.get("subkeys", []) if s[2])
             finally:
-                if use_embedded_key:
+                if throwaway:
                     _kill_gpg_agent(tmp_home)
 
         fingerprint = (
@@ -489,18 +531,30 @@ class TRO:
         # Before GnuPG 2.2.7 a missing key is reported by key ID only, which is
         # the tail of its fingerprint.
         signer = {result.fingerprint, fingerprint} - {None}
+        # The primary key or the subkey that made the signature may be named.
+        fingerprint_matches = bool(signer & expected) if expected else None
+        if valid and fingerprint_matches is False:
+            valid = False
+            status = "signing key does not have the expected fingerprint"
         return SignatureVerification(
             valid=valid,
             status=status,
             fingerprint=fingerprint,
             username=result.username,
             trust=result.trust_text if valid else None,
-            trusted=(
-                valid
-                and result.trust_level is not None
-                and result.trust_level >= result.TRUST_MARGINAL
+            trusted=valid
+            and (
+                fingerprint_matches is True
+                or keyring is not None
+                or (
+                    not use_embedded_key
+                    and result.trust_level is not None
+                    and result.trust_level >= result.TRUST_MARGINAL
+                )
             ),
             used_embedded_key=use_embedded_key,
+            keyring=keyring,
+            fingerprint_matches=fingerprint_matches,
             embedded_key_matches=(
                 any(fp.endswith(s) for fp in embedded for s in signer)
                 if embedded

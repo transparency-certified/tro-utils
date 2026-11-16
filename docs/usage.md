@@ -82,17 +82,31 @@ tro-utils verify-timestamp <declaration>
 Verifies the RFC 3161 timestamp on the TRO.
 
 ```
-tro-utils verify-signature <declaration> [--gnupghome DIR] [--use-embedded-key]
+tro-utils verify-signature <declaration> [--gnupghome DIR | --keyring FILE | --use-embedded-key] [--fingerprint FPR ...]
 ```
 Verifies the TRS's GPG signature against the declaration as stored on disk.
-The signing key must already be in your keyring (or in `--gnupghome`): how a
-TRS key comes to be trusted (the TRS's website, a registry, a fingerprint
+How a TRS key comes to be trusted (the TRS's website, a registry, a fingerprint
 published by a journal) is up to you, so tro-utils does not trust the
-`trov:publicKey` embedded in the TRO. If the key is missing, the command fails
-and prints its fingerprint; GnuPG is not allowed to fetch it by itself. If the
-key is in your keyring but you have not certified it (`gpg --lsign-key`), the
-command warns. `--use-embedded-key` verifies with the embedded key
-instead, which only shows that the TRO is self-consistent, not who signed it.
+`trov:publicKey` embedded in the TRO. Where the key is looked up:
+
+- By default, in your keyring (or in `--gnupghome`). If the key is missing, the
+  command fails and prints its fingerprint; GnuPG is not allowed to fetch it by
+  itself. If the key is in your keyring but you have not certified it
+  (`gpg --lsign-key`), the command warns.
+- `--keyring FILE`: only in a key file you obtained from the TRS, armored
+  (`.asc`) or binary (`.gpg`). Your own keyring is neither used nor changed.
+- `--use-embedded-key`: in the key embedded in the TRO, which on its own only
+  shows that the TRO is self-consistent, not who signed it.
+
+`--fingerprint` gives the fingerprint the signing key must have, as the TRS
+publishes it (spaces are ignored; it can be given more than once, e.g. across
+a key change). A signature by any other key fails. With a fingerprint you
+trust, even `--use-embedded-key` is a sound check, e.g. for a SIVACOR TRO:
+
+```
+tro-utils verify-signature tro/tro-<id>.jsonld --use-embedded-key \
+    --fingerprint "F7DB 4853 9F20 7AD4 612D C408 D8BB 2071 862A FF4A"
+```
 
 ```
 tro-utils verify-package <declaration> <package> [-a ARRANGEMENT] [-s SUBPATH] [-v]
@@ -354,6 +368,8 @@ tro.save()
 tro.request_timestamp()
 tro.verify_timestamp()   # needs neither a key nor the gpg binary
 tro.verify_signature()   # needs the TRS's key in your keyring
+tro.verify_signature(keyring="trs.asc")   # only the keys in that file
+tro.verify_signature(fingerprints=["<full fingerprint published by the TRS>"])
 
 # Verify a replication package
 result = tro.verify_replication_package(

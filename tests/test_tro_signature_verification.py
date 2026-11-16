@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from tro_utils.cli import cli
-from tro_utils.tro_utils import TRO, _kill_gpg_agent
+from tro_utils.tro_utils import TRO, _kill_gpg_agent, normalize_fingerprint
 
 from tests.helpers import create_tro_with_gpg
 
@@ -112,6 +112,35 @@ def uncertified_keyring(tmp_path, gpg_setup):
     gpg.import_keys(gpg_setup["gpg"].export_keys(gpg_setup["fingerprint"]))
     yield str(home)
     _kill_gpg_agent(str(home))
+
+
+@pytest.fixture
+def key_file(tmp_path, gpg_setup):
+    """The signing key exported to an armored file, as a TRS would publish it."""
+    path = tmp_path / "trs.asc"
+    path.write_text(gpg_setup["gpg"].export_keys(gpg_setup["fingerprint"]))
+    return str(path)
+
+
+@pytest.fixture
+def binary_key_file(tmp_path, gpg_setup):
+    path = tmp_path / "trs.gpg"
+    path.write_bytes(
+        gpg_setup["gpg"].export_keys(gpg_setup["fingerprint"], armor=False)
+    )
+    return str(path)
+
+
+@pytest.fixture
+def other_key_file(tmp_path, other_key):
+    path = tmp_path / "other.asc"
+    path.write_text(other_key)
+    return str(path)
+
+
+def _spaced(fingerprint):
+    """Format a fingerprint in groups of four, as key pages print it."""
+    return " ".join(fingerprint[i : i + 4] for i in range(0, len(fingerprint), 4))
 
 
 def _replace_embedded_key(declaration, public_key):
@@ -245,6 +274,120 @@ class TestVerifySignature:
             TRO(filepath=signed_tro).verify_signature(use_embedded_key=True)
 
 
+class TestVerifySignatureKeyringFile:
+    @pytest.mark.parametrize("fixture", ["key_file", "binary_key_file"])
+    def test_valid(self, signed_tro, gpg_setup, fixture, request):
+        path = request.getfixturevalue(fixture)
+
+        result = TRO(filepath=signed_tro).verify_signature(keyring=path)
+
+        assert result.valid
+        assert result.trusted
+        assert result.keyring == path
+        assert result.fingerprint == gpg_setup["fingerprint"]
+
+    def test_only_keys_in_file_are_used(self, signed_tro, gpg_setup, other_key_file):
+        """The signing key in the default keyring is not consulted."""
+        result = TRO(filepath=signed_tro).verify_signature(keyring=other_key_file)
+
+        assert not result.valid
+        assert result.key_missing
+        assert result.fingerprint == gpg_setup["fingerprint"]
+
+    def test_no_keys_in_file(self, signed_tro, tmp_path):
+        path = tmp_path / "empty.asc"
+        path.write_text("nothing here\n")
+
+        with pytest.raises(RuntimeError, match="No public keys found"):
+            TRO(filepath=signed_tro).verify_signature(keyring=str(path))
+
+    def test_stops_agent(self, signed_tro, key_file):
+        with patch("tro_utils.tro_utils._kill_gpg_agent") as kill:
+            TRO(filepath=signed_tro).verify_signature(keyring=key_file)
+
+        kill.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"use_embedded_key": True, "keyring": "k.asc"},
+            {"gnupghome": "home", "keyring": "k.asc"},
+            {"use_embedded_key": True, "gnupghome": "home"},
+        ],
+    )
+    def test_key_sources_are_exclusive(self, signed_tro, kwargs):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            TRO(filepath=signed_tro).verify_signature(**kwargs)
+
+
+class TestVerifySignatureFingerprint:
+    def test_match_confirms_uncertified_key(
+        self, signed_tro, gpg_setup, uncertified_keyring
+    ):
+        result = TRO(filepath=signed_tro).verify_signature(
+            gnupghome=uncertified_keyring,
+            fingerprints=[_spaced(gpg_setup["fingerprint"])],
+        )
+
+        assert result.valid
+        assert result.fingerprint_matches is True
+        assert result.trusted
+
+    def test_match_confirms_embedded_key(self, signed_tro, gpg_setup):
+        result = TRO(filepath=signed_tro).verify_signature(
+            use_embedded_key=True,
+            fingerprints=[gpg_setup["fingerprint"].lower()],
+        )
+
+        assert result.valid
+        assert result.trusted
+
+    def test_any_of_several_matches(self, signed_tro, gpg_setup):
+        result = TRO(filepath=signed_tro).verify_signature(
+            fingerprints=["A" * 40, gpg_setup["fingerprint"]]
+        )
+
+        assert result.valid
+        assert result.fingerprint_matches is True
+
+    def test_mismatch(self, signed_tro):
+        result = TRO(filepath=signed_tro).verify_signature(
+            use_embedded_key=True, fingerprints=["A" * 40]
+        )
+
+        assert not result.valid
+        assert not result.trusted
+        assert result.fingerprint_matches is False
+        assert result.status == "signing key does not have the expected fingerprint"
+
+    def test_not_given(self, signed_tro):
+        result = TRO(filepath=signed_tro).verify_signature()
+
+        assert result.fingerprint_matches is None
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (
+                "f7db 4853 9f20 7ad4 612d  c408 d8bb 2071 862a ff4a",
+                "F7DB48539F207AD4612DC408D8BB2071862AFF4A",
+            ),
+            (
+                "0xF7DB48539F207AD4612DC408D8BB2071862AFF4A",
+                "F7DB48539F207AD4612DC408D8BB2071862AFF4A",
+            ),
+            ("B" * 64, "B" * 64),
+        ],
+    )
+    def test_normalize(self, value, expected):
+        assert normalize_fingerprint(value) == expected
+
+    @pytest.mark.parametrize("value", ["D8BB2071862AFF4A", "G" * 40, ""])
+    def test_normalize_rejects(self, value):
+        with pytest.raises(ValueError, match="not a full OpenPGP key fingerprint"):
+            normalize_fingerprint(value)
+
+
 class TestVerifySignatureCLI:
     def _run(self, *args):
         return CliRunner().invoke(cli, ["verify-signature", *args])
@@ -351,3 +494,64 @@ class TestVerifySignatureCLI:
 
         assert result.exit_code == 1
         assert "Signature file does not exist" in result.output
+
+    def test_keyring_file(self, signed_tro, key_file):
+        result = self._run(signed_tro, "--keyring", key_file)
+
+        assert result.exit_code == 0, result.output
+        assert f"Key found in: {key_file}" in result.output
+        assert "Warning" not in result.output
+
+    def test_keyring_file_without_signing_key(
+        self, signed_tro, gpg_setup, other_key_file
+    ):
+        result = self._run(signed_tro, "--keyring", other_key_file)
+
+        assert result.exit_code == 1
+        assert f"Signing key {gpg_setup['fingerprint']} is not in {other_key_file}" in (
+            result.output
+        )
+
+    def test_key_sources_are_exclusive(self, signed_tro, key_file):
+        result = self._run(signed_tro, "--keyring", key_file, "--use-embedded-key")
+
+        assert result.exit_code == 2
+        assert "mutually exclusive" in result.output
+
+    def test_fingerprint_confirms_embedded_key(self, signed_tro, gpg_setup):
+        result = self._run(
+            signed_tro,
+            "--use-embedded-key",
+            "--fingerprint",
+            _spaced(gpg_setup["fingerprint"]),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Key confirmed by: the fingerprint you gave" in result.output
+        assert "Warning" not in result.output
+
+    def test_fingerprint_confirms_uncertified_key(
+        self, signed_tro, gpg_setup, uncertified_keyring
+    ):
+        result = self._run(
+            signed_tro,
+            "--gnupghome",
+            uncertified_keyring,
+            "--fingerprint",
+            gpg_setup["fingerprint"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Warning" not in result.output
+
+    def test_fingerprint_mismatch(self, signed_tro):
+        result = self._run(signed_tro, "--fingerprint", "A" * 40)
+
+        assert result.exit_code == 1
+        assert "does not have the expected fingerprint" in result.output
+
+    def test_fingerprint_must_be_full(self, signed_tro, gpg_setup):
+        result = self._run(signed_tro, "--fingerprint", gpg_setup["keyid"])
+
+        assert result.exit_code == 2
+        assert "not a full OpenPGP key fingerprint" in result.output

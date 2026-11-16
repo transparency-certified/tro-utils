@@ -16,7 +16,7 @@ It uses the `Click` library to define commands and options. Here's a summary of 
 
    - `verify-timestamp`: Verifies the RFC 3161 timestamp on the TRO.
 
-   - `verify-signature`: Verifies the TRS's GPG signature on the TRO against your keyring. Import the TRS's public key from a source you trust first; `--use-embedded-key` only checks that the TRO is self-consistent.
+   - `verify-signature`: Verifies the TRS's GPG signature on the TRO against your keyring. Import the TRS's public key from a source you trust first, or pass the key file the TRS publishes with `--keyring`; `--fingerprint` requires a given signing key. `--use-embedded-key` alone only checks that the TRO is self-consistent.
 
    - `verify-package`: Verifies a replication package (directory or `.zip`) against the hashes stored in an arrangement.
 
