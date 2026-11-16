@@ -287,7 +287,7 @@ def composition():
     pass
 
 
-@cli.group(help="Manage perfomances in the TRO")
+@cli.group(help="Manage performances in the TRO")
 def performance():
     pass
 
@@ -513,6 +513,46 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
         attrs=attribute,
     )
     tro.save()
+
+
+def _as_list(value):
+    """Normalise a JSON-LD value that may be absent, a single item, or a list."""
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+@performance.command(name="list", help="List performances recorded in the TRO")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
+@click.pass_context
+def list_performance(ctx, verbose):
+    declaration = ctx.parent.parent.params.get("declaration")
+    tro = TRO(
+        filepath=declaration,
+    )
+    for p in tro.list_performances():
+        print(f"Performance(id={p['@id']}): {p.get('rdfs:comment', '')}")
+        if not verbose:
+            continue
+        print(f"  - Started: {p.get('trov:startedAtTime', 'n/a')}")
+        print(f"  - Ended: {p.get('trov:endedAtTime', 'n/a')}")
+        for label, key in (
+            ("Accessed", "trov:accessedArrangement"),
+            ("Contributed to", "trov:contributedToArrangement"),
+        ):
+            bindings = _as_list(p.get(key))
+            if not bindings:
+                continue
+            print(f"  - {label}:")
+            for b in bindings:
+                path = b.get("trov:boundTo")
+                suffix = f" (bound to {path})" if path else ""
+                print(f"    - {b['trov:arrangement']['@id']}{suffix}")
+        attributes = _as_list(p.get("trov:hasPerformanceAttribute"))
+        if attributes:
+            print("  - Attributes:")
+            for attr in attributes:
+                print(f"    - {attr['@type']}")
 
 
 if __name__ == "__main__":

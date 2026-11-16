@@ -151,6 +151,9 @@ class TRO:
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
+    def list_performances(self):
+        return [perf.to_jsonld() for perf in self._model.performances]
+
     def get_arrangement_path_hash_map(self, arrangement_id):
         arrangement = next(
             (a for a in self._model.arrangements if a.arrangement_id == arrangement_id),

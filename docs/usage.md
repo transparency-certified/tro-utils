@@ -102,8 +102,10 @@ Shows artifacts in the current composition with their MIME type and hash.
 
 ```
 tro-utils performance add [-m COMMENT] [-s START] [-e END] [-a ATTRIBUTE] [-A ACCESSED] [-M CONTRIBUTED]
+tro-utils performance list [-v]
 ```
-Records a `TrustedResearchPerformance` entry in the TRO.
+`add` records a `TrustedResearchPerformance` entry in the TRO; `list` lists the recorded
+performances.
 `-A` and `-M` can be repeated to reference multiple input or output arrangements:
 
 ```bash
@@ -111,6 +113,23 @@ tro-utils --declaration my.jsonld performance add \
   -m "Processing run" \
   -A arrangement/0 -A arrangement/1 \
   -M arrangement/2
+```
+
+`performance list` prints one line per performance; `-v` adds the start and end times, the
+accessed and contributed arrangements (with their mount paths, if bound), and the
+performance attributes:
+
+```
+$ tro-utils --declaration my.jsonld performance list -v
+Performance(id=trp/0): Processing run
+  - Started: 2024-03-01T09:22:01+00:00
+  - Ended: 2024-03-02T10:00:11+00:00
+  - Accessed:
+    - arrangement/0 (bound to /mnt/input)
+  - Contributed to:
+    - arrangement/1
+  - Attributes:
+    - trov:InternetIsolation
 ```
 
 ```
@@ -305,6 +324,12 @@ tro.add_performance(
     accessed_arrangement="arrangement/0",   # str | (id, path) tuple | list | None
     modified_arrangement="arrangement/1",   # str | (id, path) tuple | list | None
 )
+
+# List what has been recorded (JSON-LD dicts, in insertion order)
+for a in tro.list_arrangements():
+    print(a["@id"], a["rdfs:comment"])
+for p in tro.list_performances():
+    print(p["@id"], p["rdfs:comment"], p.get("trov:startedAtTime"))
 
 # Save, sign, and timestamp. request_timestamp() attaches trov:publicKey and
 # re-saves the declaration before signing, so the .sig and .tsr always cover the
