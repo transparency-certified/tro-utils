@@ -226,7 +226,17 @@ def _normalize_fingerprints(ctx, param, values):
     help="Full fingerprint the signing key must have, e.g. as published by "
     "the TRS. Can be given more than once.",
 )
-def verify_signature(declaration, use_embedded_key, gnupghome, keyring, fingerprints):
+@click.option(
+    "--trs-keys",
+    type=click.Path(exists=True, dir_okay=False),
+    help="TRS key list (JSON, or YAML if it ends in .yaml/.yml) saying which "
+    "keys the TRS signed with and when. The key is judged by it at the time "
+    "of the TRO's trusted timestamp, which is verified too. Uses the key "
+    "embedded in the TRO unless --keyring or --gnupghome is given.",
+)
+def verify_signature(
+    declaration, use_embedded_key, gnupghome, keyring, fingerprints, trs_keys
+):
     if use_embedded_key + bool(gnupghome) + bool(keyring) > 1:
         raise click.UsageError(
             "--use-embedded-key, --gnupghome and --keyring are mutually exclusive"
@@ -245,6 +255,7 @@ def verify_signature(declaration, use_embedded_key, gnupghome, keyring, fingerpr
             gnupghome=gnupghome,
             keyring=keyring,
             fingerprints=fingerprints,
+            trs_keys=trs_keys,
         )
     except (RuntimeError, ValueError, OSError) as err:
         raise click.ClickException(str(err)) from err
@@ -276,6 +287,10 @@ def verify_signature(declaration, use_embedded_key, gnupghome, keyring, fingerpr
     click.echo(f"Key fingerprint: {result.fingerprint}")
     if result.fingerprint_matches:
         click.echo("Key confirmed by: the fingerprint you gave")
+    if result.listed_status:
+        click.echo(f"Key listed in: {trs_keys} ({result.listed_status})")
+    if result.timestamp:
+        click.echo(f"Timestamp: {result.timestamp.isoformat()}")
     if result.keyring:
         click.echo(f"Key found in: {result.keyring}")
     elif not result.used_embedded_key:
@@ -297,6 +312,8 @@ def verify_signature(declaration, use_embedded_key, gnupghome, keyring, fingerpr
             fg="yellow",
             err=True,
         )
+    for warning in result.warnings:
+        click.secho(f"Warning: {warning}", fg="yellow", err=True)
     if result.embedded_key_matches is False:
         click.secho(
             "Warning: the public key embedded in the TRO (trov:publicKey) is "

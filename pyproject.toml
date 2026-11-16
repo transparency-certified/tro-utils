@@ -21,6 +21,7 @@ dependencies = [
   "packaging",
   "python-gnupg",
   "python-magic",
+  "pyyaml",
   "rfc3161ng",
   "graphviz",
   "rich",

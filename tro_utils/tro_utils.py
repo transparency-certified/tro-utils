@@ -8,13 +8,14 @@ signing, timestamping, and report-generation logic here.
 from __future__ import annotations
 
 import base64
+import datetime
 import hashlib
 import json
 import os
 import pathlib
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from jinja2 import Template
 import requests
@@ -26,6 +27,7 @@ from . import __version__
 from .models import TransparentResearchObject
 from .models.agent import ORGANIZATION, Agent
 from .models.trs import TrustedResearchSystem
+from .trs_keys import TRSKeyList, normalize_fingerprint
 
 GPG_HOME = os.environ.get("GPG_HOME")
 
@@ -65,29 +67,17 @@ class SignatureVerification:
     keyring: str | None = None
     #: Whether the key matched an expected fingerprint; ``None`` if none given.
     fingerprint_matches: bool | None = None
+    #: The key's status in the key list, if one was given and lists it.
+    listed_status: str | None = None
+    #: Time of the TRO's trusted timestamp, when a key list needed it.
+    timestamp: datetime.datetime | None = None
+    #: Conditions that did not fail the verification but should be reported.
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def key_missing(self) -> bool:
         """``True`` when the signing key is not in the keyring used."""
         return self.status == "no public key"
-
-
-def normalize_fingerprint(value):
-    """Return *value* as an upper-case hex fingerprint without spaces.
-
-    Raises:
-        ValueError: If *value* is not a full v4 (40 hex digits) or v5/v6 (64)
-            fingerprint. A key ID is the tail of a fingerprint and is too
-            short to identify a key safely, so it is refused.
-    """
-    fingerprint = "".join(value.split()).upper()
-    if fingerprint.startswith("0X"):
-        fingerprint = fingerprint[2:]
-    if len(fingerprint) not in (40, 64) or any(
-        c not in "0123456789ABCDEF" for c in fingerprint
-    ):
-        raise ValueError(f"{value!r} is not a full OpenPGP key fingerprint")
-    return fingerprint
 
 
 class TRO:
@@ -386,8 +376,12 @@ class TRO:
             msg += f" Verify it with: pip install tro-utils=={version}"
         return msg
 
-    def verify_timestamp(self):
-        """Verify that a run is valid and signed."""
+    def verify_timestamp(self, quiet=False):
+        """Verify that a run is valid and signed.
+
+        Args:
+            quiet: Don't pass on what openssl prints.
+        """
 
         try:
             with open(self.sig_filename, "rb") as fp:
@@ -440,7 +434,12 @@ class TRO:
                 tsacert_f.name,
             ]
             try:
-                subprocess.check_call(args)
+                if quiet:
+                    subprocess.check_call(
+                        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                else:
+                    subprocess.check_call(args)
             except subprocess.CalledProcessError as err:
                 mismatch = self.created_with_mismatch()
                 if mismatch is None:
@@ -449,8 +448,19 @@ class TRO:
                     f"Timestamp verification failed. {mismatch}"
                 ) from err
 
+    def timestamp_time(self):
+        """Return the time in the TRO's timestamp, without verifying it."""
+        with open(self.tsr_filename, "rb") as fp:
+            response = rfc3161ng.decode_timestamp_response(fp.read())
+        return rfc3161ng.get_timestamp(response.time_stamp_token, naive=False)
+
     def verify_signature(
-        self, use_embedded_key=False, gnupghome=None, keyring=None, fingerprints=None
+        self,
+        use_embedded_key=False,
+        gnupghome=None,
+        keyring=None,
+        fingerprints=None,
+        trs_keys=None,
     ):
         """Verify the TRS signature against the declaration as stored on disk.
 
@@ -469,6 +479,12 @@ class TRO:
             fingerprints: Fingerprints the signing key is expected to have,
                 e.g. as published by the TRS. A signature by any other key is
                 reported as invalid.
+            trs_keys: A key list (path or :class:`TRSKeyList`) saying which
+                keys the TRS signed with and when. The key is then judged by
+                the list at the time of the TRO's trusted timestamp, which is
+                verified too, instead of by its current OpenPGP state. Unless
+                ``gnupghome`` or ``keyring`` is given, the key embedded in
+                the TRO is used, since the list vouches for its fingerprint.
 
         Returns:
             A :class:`SignatureVerification`.
@@ -480,6 +496,15 @@ class TRO:
                 "use_embedded_key, gnupghome and keyring are mutually exclusive"
             )
         expected = {normalize_fingerprint(fp) for fp in fingerprints or ()}
+        key_list = None
+        if trs_keys is not None:
+            key_list = (
+                trs_keys
+                if isinstance(trs_keys, TRSKeyList)
+                else TRSKeyList.load(trs_keys)
+            )
+            if not gnupghome and not keyring:
+                use_embedded_key = True
         if not os.path.exists(self.sig_filename):
             raise RuntimeError("Signature file does not exist")
         with open(self.tro_filename, "rb") as fp:
@@ -525,12 +550,52 @@ class TRO:
         # status with "signature valid"; key_status keeps the reason.
         status = result.key_status or result.status or "signature error"
         valid = bool(result.valid)
-        if result.trust_level == result.TRUST_NEVER:
-            valid = False
-            status = "signing key is marked as never trusted"
         # Before GnuPG 2.2.7 a missing key is reported by key ID only, which is
         # the tail of its fingerprint.
         signer = {result.fingerprint, fingerprint} - {None}
+
+        warnings = []
+        listed = None
+        signed_at = None
+        # VALIDSIG, i.e. the signature is cryptographically correct, whatever
+        # gpg thinks of the key's expiry or revocation today.
+        if key_list is not None and result.status == "signature valid":
+            if os.path.exists(self.tsr_filename):
+                try:
+                    self.verify_timestamp(quiet=True)
+                except subprocess.CalledProcessError as err:
+                    raise RuntimeError(
+                        "Timestamp verification failed, so the time of signing "
+                        "is unknown"
+                    ) from err
+                signed_at = self.timestamp_time()
+            trs_id = self._model.trs.trs_id
+            listed_keys = key_list.keys_for(trs_id)
+            listed = next(
+                (k for k in listed_keys or () if k.fingerprint in signer), None
+            )
+            if listed_keys is None:
+                valid = False
+                status = f"the key list has no TRS with @id {trs_id}"
+            elif listed is None:
+                valid = False
+                status = f"the signing key is not listed for {trs_id}"
+            else:
+                valid, message = listed.check(signed_at)
+                if not valid:
+                    status = message
+                else:
+                    status = "signature valid"
+                    if message:
+                        warnings.append(message)
+                    if result.key_status:
+                        warnings.append(
+                            f"GnuPG reports: {result.key_status}; the key was "
+                            "judged by the key list instead"
+                        )
+        if result.trust_level == result.TRUST_NEVER:
+            valid = False
+            status = "signing key is marked as never trusted"
         # The primary key or the subkey that made the signature may be named.
         fingerprint_matches = bool(signer & expected) if expected else None
         if valid and fingerprint_matches is False:
@@ -545,6 +610,7 @@ class TRO:
             trusted=valid
             and (
                 fingerprint_matches is True
+                or listed is not None
                 or keyring is not None
                 or (
                     not use_embedded_key
@@ -555,6 +621,9 @@ class TRO:
             used_embedded_key=use_embedded_key,
             keyring=keyring,
             fingerprint_matches=fingerprint_matches,
+            listed_status=listed.status if listed is not None else None,
+            timestamp=signed_at,
+            warnings=warnings,
             embedded_key_matches=(
                 any(fp.endswith(s) for fp in embedded for s in signer)
                 if embedded

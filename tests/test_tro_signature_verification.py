@@ -1,11 +1,14 @@
 """Tests for verifying the TRS signature of a TRO."""
 
+import datetime
 import json
 import pathlib
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import gnupg
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from tro_utils.cli import cli
@@ -141,6 +144,39 @@ def other_key_file(tmp_path, other_key):
 def _spaced(fingerprint):
     """Format a fingerprint in groups of four, as key pages print it."""
     return " ".join(fingerprint[i : i + 4] for i in range(0, len(fingerprint), 4))
+
+
+def _write_key_list(path, declaration, fingerprint, trs_id=None, **key):
+    """Write a key list for the TRS of *declaration*, as JSON or YAML."""
+    data = {
+        "format": "https://w3id.org/trace/trs-keys/v1",
+        "systems": [
+            {
+                "ids": [trs_id or TRO(filepath=declaration)._model.trs.trs_id],
+                "keys": [
+                    {"fingerprint": fingerprint, "valid_from": "2019-01-01", **key}
+                ],
+            }
+        ],
+    }
+    path = pathlib.Path(path)
+    if path.suffix == ".yaml":
+        path.write_text(yaml.safe_dump(data))
+    else:
+        path.write_text(json.dumps(data))
+    return str(path)
+
+
+@pytest.fixture
+def timestamped(tmp_path):
+    """Give the signed TRO a .tsr whose verified time is 2026-01-01."""
+    (tmp_path / "test_tro.tsr").write_bytes(b"tsr")
+    when = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    with (
+        patch.object(TRO, "verify_timestamp") as verify,
+        patch.object(TRO, "timestamp_time", return_value=when),
+    ):
+        yield verify
 
 
 def _replace_embedded_key(declaration, public_key):
@@ -388,6 +424,208 @@ class TestVerifySignatureFingerprint:
             normalize_fingerprint(value)
 
 
+class TestVerifySignatureTRSKeys:
+    @pytest.mark.parametrize("name", ["keys.json", "keys.yaml"])
+    def test_current_key(self, signed_tro, gpg_setup, tmp_path, timestamped, name):
+        keys = _write_key_list(tmp_path / name, signed_tro, gpg_setup["fingerprint"])
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert result.valid
+        assert result.trusted
+        assert result.used_embedded_key
+        assert result.listed_status == "current"
+        assert result.timestamp.year == 2026
+        assert result.warnings == []
+        timestamped.assert_called_once_with(quiet=True)
+
+    def test_uses_keyring_when_given(
+        self, signed_tro, gpg_setup, tmp_path, timestamped, key_file
+    ):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(
+            trs_keys=keys, keyring=key_file
+        )
+
+        assert result.valid
+        assert not result.used_embedded_key
+
+    def test_retired_key_in_window(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            status="retired",
+            valid_until="2026-06-01",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert result.valid
+        assert result.listed_status == "retired"
+
+    def test_retired_key_after_window(
+        self, signed_tro, gpg_setup, tmp_path, timestamped
+    ):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            status="retired",
+            valid_until="2025-06-01",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        assert not result.trusted
+        assert "after the key went out of use" in result.status
+
+    def test_compromised_later(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            status="compromised",
+            compromised_since="2026-06-01",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert result.valid
+        assert "signed before that" in result.warnings[0]
+
+    def test_compromised_earlier(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            status="compromised",
+            compromised_since="2025-06-01",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        assert "after the key was compromised" in result.status
+
+    def test_no_timestamp_current_key(self, signed_tro, gpg_setup, tmp_path):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert result.valid
+        assert result.timestamp is None
+        assert "no trusted timestamp" in result.warnings[0]
+
+    def test_no_timestamp_retired_key(self, signed_tro, gpg_setup, tmp_path):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            status="retired",
+            valid_until="2030-01-01",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        assert "the key is retired" in result.status
+
+    def test_bad_timestamp(self, signed_tro, gpg_setup, tmp_path):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+        (tmp_path / "test_tro.tsr").write_bytes(b"tsr")
+
+        with (
+            patch.object(
+                TRO,
+                "verify_timestamp",
+                side_effect=subprocess.CalledProcessError(1, "openssl"),
+            ),
+            pytest.raises(RuntimeError, match="Timestamp verification failed"),
+        ):
+            TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+    def test_key_not_listed(self, signed_tro, tmp_path, timestamped):
+        keys = _write_key_list(tmp_path / "k.json", signed_tro, "A" * 40)
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        assert result.status.startswith("the signing key is not listed for")
+
+    def test_trs_not_listed(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            signed_tro,
+            gpg_setup["fingerprint"],
+            trs_id="https://example.org/",
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        assert result.status.startswith("the key list has no TRS with @id")
+
+    def test_expired_key_judged_by_list(self, expired_key_tro, tmp_path):
+        """A key that has since expired passes if the list covers the signature."""
+        declaration, home = expired_key_tro
+        fingerprint = gnupg.GPG(gnupghome=home).list_keys()[0]["fingerprint"]
+        keys = _write_key_list(
+            tmp_path / "k.json",
+            declaration,
+            fingerprint,
+            status="retired",
+            valid_until="2020-01-02",
+        )
+        (tmp_path / "test_tro.tsr").write_bytes(b"tsr")
+        when = datetime.datetime(2020, 1, 1, 12, tzinfo=datetime.timezone.utc)
+
+        with (
+            patch.object(TRO, "verify_timestamp"),
+            patch.object(TRO, "timestamp_time", return_value=when),
+        ):
+            result = TRO(filepath=declaration).verify_signature(
+                gnupghome=home, trs_keys=keys
+            )
+
+        assert result.valid
+        assert "signing key has expired" in result.warnings[0]
+
+    def test_tampered(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+        with open(signed_tro, "a") as fp:
+            fp.write("\n")
+
+        result = TRO(filepath=signed_tro).verify_signature(trs_keys=keys)
+
+        assert not result.valid
+        timestamped.assert_not_called()
+
+    def test_never_trusted_still_fails(
+        self, signed_tro, gpg_setup, tmp_path, timestamped, never_trusted_keyring
+    ):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+
+        result = TRO(filepath=signed_tro).verify_signature(
+            trs_keys=keys, gnupghome=never_trusted_keyring
+        )
+
+        assert not result.valid
+        assert result.status == "signing key is marked as never trusted"
+
+
 class TestVerifySignatureCLI:
     def _run(self, *args):
         return CliRunner().invoke(cli, ["verify-signature", *args])
@@ -555,3 +793,42 @@ class TestVerifySignatureCLI:
 
         assert result.exit_code == 2
         assert "not a full OpenPGP key fingerprint" in result.output
+
+    def test_trs_keys(self, signed_tro, gpg_setup, tmp_path, timestamped):
+        keys = _write_key_list(
+            tmp_path / "k.yaml", signed_tro, gpg_setup["fingerprint"]
+        )
+
+        result = self._run(signed_tro, "--trs-keys", keys)
+
+        assert result.exit_code == 0, result.output
+        assert f"Key listed in: {keys} (current)" in result.output
+        assert "Timestamp: 2026-01-01T00:00:00+00:00" in result.output
+        assert "Warning" not in result.output
+
+    def test_trs_keys_warning(self, signed_tro, gpg_setup, tmp_path):
+        keys = _write_key_list(
+            tmp_path / "k.json", signed_tro, gpg_setup["fingerprint"]
+        )
+
+        result = self._run(signed_tro, "--trs-keys", keys)
+
+        assert result.exit_code == 0, result.output
+        assert "Warning: the TRO has no trusted timestamp" in result.output
+
+    def test_trs_keys_rejects(self, signed_tro, tmp_path, timestamped):
+        keys = _write_key_list(tmp_path / "k.json", signed_tro, "A" * 40)
+
+        result = self._run(signed_tro, "--trs-keys", keys)
+
+        assert result.exit_code == 1
+        assert "the signing key is not listed for" in result.output
+
+    def test_invalid_trs_keys(self, signed_tro, tmp_path):
+        keys = tmp_path / "k.yaml"
+        keys.write_text("format: nope\n")
+
+        result = self._run(signed_tro, "--trs-keys", str(keys))
+
+        assert result.exit_code == 1
+        assert "format must be" in result.output
