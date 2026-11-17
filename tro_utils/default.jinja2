@@ -61,6 +61,14 @@ Arrangements define how artifacts, typically files, are organized before and aft
 {%- for arrangement in tro["arrangements"].keys() %}
 
 ### {{ tro["arrangements"][arrangement]["name"] }}
+{%- set artifacts = tro["arrangements"][arrangement]["artifacts"] %}
+{%- set n_paths = artifacts | length %}
+{%- set n_hashes = artifacts.values() | map(attribute="hash") | unique | list | length %}
+
+{{ n_paths }} distinct path{{ "s" if n_paths != 1 }}, {{ n_hashes }} distinct hash{{ "es" if n_hashes != 1 }}
+
+<details>
+<summary>Show artifacts</summary>
 
 | Artifact | Hash | Status |
 | -------- | ---- | ------ |
@@ -72,4 +80,6 @@ Arrangements define how artifacts, typically files, are organized before and aft
 
     {%- endif %}
 {%- endfor %}
+
+</details>
 {%- endfor %}

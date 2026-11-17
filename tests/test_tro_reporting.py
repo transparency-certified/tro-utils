@@ -185,3 +185,34 @@ def test_default_report_embeds_logo(tmp_path):
     assert prefix in header
     encoded = header.split(prefix)[1].split('"')[0]
     assert base64.b64decode(encoded).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_default_report_collapses_arrangements(tmp_path):
+    """Each arrangement gets a summary line and a collapsed table (#40)."""
+    import json
+
+    from tro_utils.tro_utils import TRO
+
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    (workspace / "a.txt").write_text("same")
+    (workspace / "b.txt").write_text("same")
+    profile = tmp_path / "trs.jsonld"
+    profile.write_text(json.dumps({"@id": "https://example.org/trs"}))
+
+    tro = TRO(filepath=str(tmp_path / "t.jsonld"), profile=str(profile))
+    tro.add_arrangement(str(workspace), comment="Before")
+    (workspace / "c.txt").write_text("new")
+    tro.add_arrangement(str(workspace), comment="After")
+    report = tmp_path / "report.md"
+    tro.generate_report(str(DEFAULT_TEMPLATE), str(report))
+
+    arrangements = report.read_text().split("## Arrangements")[1]
+    before, after = arrangements.split("### Before")[1].split("### After")
+    assert "2 distinct paths, 1 distinct hash\n" in before
+    assert "3 distinct paths, 2 distinct hashes\n" in after
+    for section in (before, after):
+        assert section.index("distinct") < section.index("<details>")
+        # GitHub only renders Markdown inside <details> after a blank line.
+        assert "<summary>Show artifacts</summary>\n\n| Artifact" in section
+        assert section.rstrip().endswith("</details>")
