@@ -7,7 +7,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from . import TRPAttribute
+from . import TRPAttribute, __version__
 from .models.arrangement import ArtifactArrangement
 from .models.composition import ArtifactComposition
 from .tro_utils import TRO, normalize_fingerprint
@@ -84,6 +84,7 @@ class StringOrPath(click.ParamType):
 
 
 @click.group()
+@click.version_option(__version__, "--version", "-v", prog_name="tro-utils")
 @click.option(
     "--declaration",
     type=click.Path(),
