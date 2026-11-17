@@ -576,7 +576,9 @@ def sign(ctx):
     required=True,
     help=f"Template file or one of the following: {', '.join(_TEMPLATES.keys())}",
 )
-@click.option("--output", "-o", type=click.Path(), required=True, help="Output file")
+@click.option(
+    "--output", "-o", type=click.Path(), required=True, help="Output file in Markdown"
+)
 @click.pass_context
 def generate_report(ctx, template, output):
     declaration = ctx.parent.params.get("declaration")

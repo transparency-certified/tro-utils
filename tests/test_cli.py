@@ -1021,6 +1021,13 @@ class TestCreatorType:
         assert "--tro-creator-type" in result.output
 
 
+def test_report_help_mentions_markdown(runner):
+    """The report output format should be stated in --help (#40)."""
+    result = runner.invoke(cli, ["report", "--help"])
+    assert result.exit_code == 0
+    assert "Output file in Markdown" in result.output
+
+
 @pytest.mark.parametrize("flag", ["--version", "-v"])
 def test_cli_version(runner, flag):
     """``--version`` / ``-v`` should print the package version and exit."""
