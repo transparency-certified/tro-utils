@@ -130,6 +130,21 @@ class TestLoad:
             (_list(valid_from="yesterday"), "not an ISO 8601 date"),
             (_list(valid_from="2025-11-13T00:00:00"), "has no time zone"),
             (_list(valid_until="2025-01-01"), "valid_until is before valid_from"),
+            (_list(valid_from=20251113), "expected an ISO 8601 date, got"),
+            (_list() | {"systems": ["sivacor"]}, r"systems\[0\]: expected a mapping"),
+            (
+                _list() | {"systems": [{"ids": "https://sivacor.org/", "keys": []}]},
+                r"systems\[0\]\.ids: expected a list of IRIs",
+            ),
+            (
+                _list() | {"systems": [{"ids": ["https://sivacor.org/"], "keys": {}}]},
+                r"systems\[0\]\.keys: expected a list",
+            ),
+            (
+                _list()
+                | {"systems": [{"ids": ["https://sivacor.org/"], "keys": [FPR]}]},
+                r"systems\[0\]\.keys\[0\]: expected a mapping",
+            ),
         ],
     )
     def test_rejects(self, data, message):

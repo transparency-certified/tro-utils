@@ -37,6 +37,24 @@ def signed_tro(tmp_path, temp_workspace, gpg_setup, trs_profile):
 
 
 @pytest.fixture
+def mislabeled_tro(tmp_path, temp_workspace, gpg_setup, trs_profile, other_key):
+    """Return a TRO signed by the test key that embeds a different public key."""
+    declaration = str(tmp_path / "test_tro.jsonld")
+    tro = create_tro_with_gpg(
+        filepath=declaration,
+        gpg_setup=gpg_setup,
+        profile=trs_profile,
+        gpg_fingerprint=gpg_setup["fingerprint"],
+        gpg_passphrase=gpg_setup["passphrase"],
+    )
+    tro.add_arrangement(str(temp_workspace), comment="Test")
+    tro._model.trs.public_key = other_key
+    tro.save()
+    tro.trs_signature()
+    return declaration
+
+
+@pytest.fixture
 def empty_keyring(tmp_path):
     home = tmp_path / "empty_gnupg"
     home.mkdir(mode=0o700)
@@ -221,6 +239,12 @@ class TestVerifySignature:
 
         kill.assert_called_once()
 
+    def test_kill_gpg_agent_without_gpgconf(self, tmp_path):
+        with patch("subprocess.run", side_effect=FileNotFoundError) as run:
+            _kill_gpg_agent(str(tmp_path))
+
+        run.assert_called_once()
+
     def test_uncertified_key(self, signed_tro, uncertified_keyring):
         """A key that is only present in the keyring is not trusted."""
         result = TRO(filepath=signed_tro).verify_signature(
@@ -308,6 +332,12 @@ class TestVerifySignature:
 
         with pytest.raises(RuntimeError, match="does not embed a public key"):
             TRO(filepath=signed_tro).verify_signature(use_embedded_key=True)
+
+    def test_valid_signature_with_wrong_embedded_key(self, mislabeled_tro):
+        result = TRO(filepath=mislabeled_tro).verify_signature()
+
+        assert result.valid
+        assert result.embedded_key_matches is False
 
 
 class TestVerifySignatureKeyringFile:
@@ -699,6 +729,13 @@ class TestVerifySignatureCLI:
         assert "did not sign it" in result.output
         assert gpg_setup["fingerprint"] in result.output
         assert "or use --use-embedded-key" not in result.output
+
+    def test_wrong_embedded_key_warns(self, mislabeled_tro):
+        result = self._run(mislabeled_tro)
+
+        assert result.exit_code == 0, result.output
+        assert "Signature: OK" in result.output
+        assert "(trov:publicKey) is not the key that signed it" in result.output
 
     def test_never_trusted_key(self, signed_tro, never_trusted_keyring):
         result = self._run(signed_tro, "--gnupghome", never_trusted_keyring)

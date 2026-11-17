@@ -1,5 +1,6 @@
 """Tests for TRO timestamping operations."""
 
+import datetime
 import hashlib
 import json
 import os
@@ -202,6 +203,47 @@ class TestTROTimestamping:
 
         hashed = json.loads(verified_payload["data"])["tro_declaration"]
         assert hashed == hashlib.sha512(declaration.read_bytes()).hexdigest()
+
+    @patch("subprocess.check_call")
+    @patch("requests.get")
+    def test_verify_timestamp_quiet(
+        self, mock_get, mock_check_call, tmp_path, trs_profile
+    ):
+        """quiet=True hides what openssl prints."""
+        mock_get.return_value = MagicMock(content=b"fake cert content")
+        declaration = tmp_path / "test_tro.jsonld"
+        TRO(filepath=str(declaration), profile=trs_profile).save()
+        (tmp_path / "test_tro.sig").write_bytes(b"fake sig data")
+        (tmp_path / "test_tro.tsr").write_bytes(b"fake tsr data")
+
+        TRO(filepath=str(declaration)).verify_timestamp(quiet=True)
+
+        assert mock_check_call.call_args.kwargs == {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+
+    def test_verify_timestamp_missing_signature(self, tmp_path, trs_profile):
+        declaration = tmp_path / "test_tro.jsonld"
+        TRO(filepath=str(declaration), profile=trs_profile).save()
+
+        with pytest.raises(RuntimeError, match="Signature file does not exist"):
+            TRO(filepath=str(declaration)).verify_timestamp()
+
+    @patch("tro_utils.tro_utils.rfc3161ng.get_timestamp")
+    @patch("tro_utils.tro_utils.rfc3161ng.decode_timestamp_response")
+    def test_timestamp_time(self, mock_decode, mock_get_timestamp, tmp_path):
+        """The time is read from the stored response, as an aware datetime."""
+        declaration = tmp_path / "test_tro.jsonld"
+        (tmp_path / "test_tro.tsr").write_bytes(b"tsr data")
+        when = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        mock_get_timestamp.return_value = when
+
+        assert TRO(filepath=str(declaration)).timestamp_time() == when
+        mock_decode.assert_called_once_with(b"tsr data")
+        mock_get_timestamp.assert_called_once_with(
+            mock_decode.return_value.time_stamp_token, naive=False
+        )
 
 
 def _saved_tro(tmp_path, trs_profile, created_with):
