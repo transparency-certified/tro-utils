@@ -361,6 +361,104 @@ class TestVerifyCommands:
         assert "data.csv" in result.output or "extra.txt" in result.output
 
 
+class TestVerifyDeclarationForms:
+    """verify-* take the declaration as an argument or as --declaration (#15)."""
+
+    @pytest.fixture
+    def tro_file(self, runner, tmp_path, temp_workspace, trs_profile):
+        tro_file = tmp_path / "test_tro.jsonld"
+        runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "--profile",
+                trs_profile,
+                "arrangement",
+                "add",
+                str(temp_workspace),
+            ],
+        )
+        return tro_file
+
+    def test_verify_package_global_declaration(self, runner, tro_file, temp_workspace):
+        result = runner.invoke(
+            cli,
+            ["--declaration", str(tro_file), "verify-package", str(temp_workspace)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "✓" in result.output
+
+    def test_verify_package_same_declaration_twice(
+        self, runner, tro_file, temp_workspace, monkeypatch
+    ):
+        """The same file given both ways is fine, however it is spelled."""
+        monkeypatch.chdir(tro_file.parent)
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                tro_file.name,
+                "verify-package",
+                str(tro_file),
+                str(temp_workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "✓" in result.output
+
+    @pytest.mark.parametrize(
+        "command", ["verify-timestamp", "verify-signature", "verify-package"]
+    )
+    def test_conflicting_declarations(self, runner, tro_file, temp_workspace, command):
+        other = tro_file.with_name("other.jsonld")
+        other.write_text(tro_file.read_text())
+        args = ["--declaration", str(other), command, str(tro_file)]
+        if command == "verify-package":
+            args.append(str(temp_workspace))
+        result = runner.invoke(cli, args)
+        assert result.exit_code != 0
+        assert "two different declarations" in result.output
+
+    @pytest.mark.parametrize(
+        "command", ["verify-timestamp", "verify-signature", "verify-package"]
+    )
+    def test_missing_declaration(self, runner, temp_workspace, command):
+        args = [command]
+        if command == "verify-package":
+            args.append(str(temp_workspace))
+        result = runner.invoke(cli, args)
+        assert result.exit_code != 0
+        assert "Missing the declaration" in result.output
+        assert f"tro-utils --declaration FILE {command}" in result.output
+
+    @pytest.mark.parametrize(
+        "command", ["verify-timestamp", "verify-signature", "verify-package"]
+    )
+    def test_global_declaration_must_exist(
+        self, runner, tmp_path, temp_workspace, command
+    ):
+        args = ["--declaration", str(tmp_path / "nope.jsonld"), command]
+        if command == "verify-package":
+            args.append(str(temp_workspace))
+        result = runner.invoke(cli, args)
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+
+    def test_verify_package_requires_package(self, runner, tro_file):
+        result = runner.invoke(cli, ["--declaration", str(tro_file), "verify-package"])
+        assert result.exit_code != 0
+        assert "Missing argument 'PACKAGE'" in result.output
+
+    def test_verify_timestamp_global_declaration(self, runner, tro_file):
+        """--declaration reaches verify-timestamp (the TRO here is unsigned)."""
+        result = runner.invoke(
+            cli, ["--declaration", str(tro_file), "verify-timestamp"]
+        )
+        assert "Missing the declaration" not in result.output
+        assert "Signature file does not exist" in result.output
+
+
 class TestReportCommand:
     """Test report generation CLI command."""
 
