@@ -692,13 +692,13 @@ class TRO:
                         arrangements[keys[n]]["artifacts"][location]["hash"]
                         != arrangements[keys[n - 1]]["artifacts"][location]["hash"]
                     ):
-                        arrangements[keys[n]]["artifacts"][location]["status"] = (
-                            "Changed"
-                        )
+                        arrangements[keys[n]]["artifacts"][location][
+                            "status"
+                        ] = "Changed"
                     else:
-                        arrangements[keys[n]]["artifacts"][location]["status"] = (
-                            "Unchanged"
-                        )
+                        arrangements[keys[n]]["artifacts"][location][
+                            "status"
+                        ] = "Unchanged"
                 else:
                     arrangements[keys[n]]["artifacts"][location]["status"] = "Created"
 

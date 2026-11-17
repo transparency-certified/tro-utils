@@ -53,6 +53,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "coverage>=7.0",
     "setuptools-scm",
+    "black==26.3.1",
     "wheel>=0.33.6",
     "watchdog>=0.9.0",
     "flake8>=3.7.8",
@@ -66,3 +67,6 @@ tro_utils = ["*.jinja2", "certs/*.pem"]
 
 [tool.setuptools_scm]
 write_to = "tro_utils/_version.py"
+
+[tool.black]
+target-version = ["py310", "py311", "py312"]
