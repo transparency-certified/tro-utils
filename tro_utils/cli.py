@@ -173,11 +173,42 @@ def cli(
     pass
 
 
+def _resolve_declaration(ctx, declaration):
+    """Return the declaration given as an argument or as the global --declaration.
+
+    The verify commands predate the global option and take the declaration as
+    an argument; accept either, but not two different files.
+    """
+    global_declaration = ctx.parent.params.get("declaration")
+    if declaration is None:
+        declaration = global_declaration
+    elif global_declaration is not None and (
+        pathlib.Path(declaration).resolve()
+        != pathlib.Path(global_declaration).resolve()
+    ):
+        raise click.UsageError(
+            f"Got two different declarations: {global_declaration!r} "
+            f"(--declaration) and {declaration!r}."
+        )
+    if declaration is None:
+        raise click.UsageError(
+            "Missing the declaration. Pass it as an argument or with the "
+            f"global option: tro-utils --declaration FILE {ctx.info_name} ..."
+        )
+    if not pathlib.Path(declaration).exists():
+        raise click.BadParameter(
+            f"Path {declaration!r} does not exist.", param_hint="'--declaration'"
+        )
+    return declaration
+
+
 @cli.command(
     help="Verify the TRO's timestamp (use verify-signature to check its signature)"
 )
-@click.argument("declaration", type=click.Path(exists=True))
-def verify_timestamp(declaration):
+@click.argument("declaration", type=click.Path(exists=True), required=False)
+@click.pass_context
+def verify_timestamp(ctx, declaration):
+    declaration = _resolve_declaration(ctx, declaration)
     tro = TRO(
         filepath=declaration,
     )
@@ -201,7 +232,7 @@ def _normalize_fingerprints(ctx, param, values):
     name="verify-signature",
     help="Verify the TRS signature of the TRO against your GPG keyring",
 )
-@click.argument("declaration", type=click.Path(exists=True))
+@click.argument("declaration", type=click.Path(exists=True), required=False)
 @click.option(
     "--use-embedded-key",
     is_flag=True,
@@ -235,9 +266,11 @@ def _normalize_fingerprints(ctx, param, values):
     "of the TRO's trusted timestamp, which is verified too. Uses the key "
     "embedded in the TRO unless --keyring or --gnupghome is given.",
 )
+@click.pass_context
 def verify_signature(
-    declaration, use_embedded_key, gnupghome, keyring, fingerprints, trs_keys
+    ctx, declaration, use_embedded_key, gnupghome, keyring, fingerprints, trs_keys
 ):
+    declaration = _resolve_declaration(ctx, declaration)
     if use_embedded_key + bool(gnupghome) + bool(keyring) > 1:
         raise click.UsageError(
             "--use-embedded-key, --gnupghome and --keyring are mutually exclusive"
@@ -325,10 +358,10 @@ def verify_signature(
 
 
 @cli.command(help="Verify the integrity of the TRO")
-@click.argument("declaration", type=click.Path(exists=True))
+@click.argument("declaration", type=click.Path(exists=True), required=False)
+# Optional only so that DECLARATION can be left out; the command checks it.
 @click.argument(
-    "package",
-    type=click.Path(exists=True),
+    "package", type=click.Path(exists=True), required=False, metavar="PACKAGE"
 )
 @click.option(
     "--arrangement-id",
@@ -350,7 +383,17 @@ def verify_signature(
     is_flag=True,
     help="Show detailed information during verification",
 )
-def verify_package(declaration, package, arrangement_id, subpath, verbose):
+@click.pass_context
+def verify_package(ctx, declaration, package, arrangement_id, subpath, verbose):
+    if package is None:
+        # A single argument is the package; the declaration comes from
+        # --declaration.
+        declaration, package = None, declaration
+    if package is None:
+        raise click.MissingParameter(
+            ctx=ctx, param_hint="'PACKAGE'", param_type="argument"
+        )
+    declaration = _resolve_declaration(ctx, declaration)
     subpath = subpath if subpath else None
     tro = TRO(
         filepath=declaration,
