@@ -22,7 +22,7 @@ It uses the `Click` library to define commands and options. Here's a summary of 
 
    - `composition`: Manages compositions in the TRO. It has a subcommand `info` that gets info about the current composition.
 
-   - `performance`: Manages performances in the TRO. It has a subcommand `add` that adds a performance to the TRO.
+   - `performance`: Manages performances in the TRO. Subcommands: `add` (adds a performance to the TRO) and `list` (lists the performances recorded in the TRO; `-v` also shows start/end times, accessed and contributed arrangements with their mount paths, and performance attributes).
 
    - `sign`: Signs the TRO. This records the public half of the signing key as `trov:publicKey` in the declaration, saves the declaration, and then produces the signature and the RFC 3161 timestamp over it.
 
@@ -127,6 +127,8 @@ $ tro-utils --declaration sample_tro.jsonld performance add \
   -a trov:InternetAccessRecording \
   -A arrangement/0 \
   -M arrangement/1
+$ tro-utils --declaration sample_tro.jsonld performance list
+  Performance(id=trp/0): My magic workflow
  $ tro-utils --declaration sample_tro.jsonld sign
  $ tro-utils --declaration sample_tro.jsonld verify-timestamp
    ...

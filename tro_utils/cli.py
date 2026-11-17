@@ -287,7 +287,7 @@ def composition():
     pass
 
 
-@cli.group(help="Manage perfomances in the TRO")
+@cli.group(help="Manage performances in the TRO")
 def performance():
     pass
 
@@ -390,14 +390,23 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
     tro.save()
 
 
+def _load_existing_tro(declaration):
+    """Load a declaration for a read-only command, refusing to invent an empty one."""
+    if declaration is None:
+        raise click.UsageError("--declaration is required.")
+    tro = TRO(filepath=declaration)
+    if not pathlib.Path(tro.tro_filename).exists():
+        raise click.ClickException(
+            f"Declaration file '{tro.tro_filename}' does not exist."
+        )
+    return tro
+
+
 @arrangement.command(name="list", help="List available arrangements in the TRO")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
 @click.pass_context
 def list_arrangement(ctx, verbose):
-    declaration = ctx.parent.parent.params.get("declaration")
-    tro = TRO(
-        filepath=declaration,
-    )
+    tro = _load_existing_tro(ctx.parent.parent.params.get("declaration"))
     for a in tro.list_arrangements():
         print(f"Arrangement(id={a['@id']}): {a['rdfs:comment']}")
         if verbose:
@@ -513,6 +522,36 @@ def performance_add(ctx, comment, start, end, attribute, accessed, modified):
         attrs=attribute,
     )
     tro.save()
+
+
+@performance.command(name="list", help="List performances recorded in the TRO")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
+@click.pass_context
+def list_performance(ctx, verbose):
+    tro = _load_existing_tro(ctx.parent.parent.params.get("declaration"))
+    for p in tro.list_performances():
+        print(f"Performance(id={p['@id']}): {p.get('rdfs:comment', '')}")
+        if not verbose:
+            continue
+        print(f"  - Started: {p.get('trov:startedAtTime', 'n/a')}")
+        print(f"  - Ended: {p.get('trov:endedAtTime', 'n/a')}")
+        for label, key in (
+            ("Accessed", "trov:accessedArrangement"),
+            ("Contributed to", "trov:contributedToArrangement"),
+        ):
+            bindings = p.get(key, [])
+            if not bindings:
+                continue
+            print(f"  - {label}:")
+            for b in bindings:
+                path = b.get("trov:boundTo")
+                suffix = f" (bound to {path})" if path else ""
+                print(f"    - {b['trov:arrangement']['@id']}{suffix}")
+        attributes = p["trov:hasPerformanceAttribute"]
+        if attributes:
+            print("  - Attributes:")
+            for attr in attributes:
+                print(f"    - {attr['@type']}")
 
 
 if __name__ == "__main__":

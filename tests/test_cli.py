@@ -669,6 +669,121 @@ class TestCLIPerformance:
         assert by_id["arrangement/0"]["trov:boundTo"] == "/mnt/a"
         assert "trov:boundTo" not in by_id["arrangement/1"]
 
+    def _add_performance(self, runner, tro_file, comment, *extra):
+        result = runner.invoke(
+            cli,
+            [
+                "--declaration",
+                str(tro_file),
+                "performance",
+                "add",
+                "--comment",
+                comment,
+                "--start",
+                "2024-01-01T10:00:00+00:00",
+                "--end",
+                "2024-01-01T11:00:00+00:00",
+                *extra,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_performance_list(self, runner, tmp_path, temp_workspace, trs_profile):
+        """performance list prints one line per performance, in order."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(runner, tro_file, trs_profile, temp_workspace)
+        self._add_performance(
+            runner, tro_file, "First run", "-A", "arrangement/0", "-M", "arrangement/1"
+        )
+        self._add_performance(runner, tro_file, "Second run", "-A", "arrangement/1")
+        result = runner.invoke(
+            cli, ["--declaration", str(tro_file), "performance", "list"]
+        )
+        assert result.exit_code == 0, result.output
+        lines = result.output.splitlines()
+        assert lines == [
+            "Performance(id=trp/0): First run",
+            "Performance(id=trp/1): Second run",
+        ]
+
+    def test_performance_list_verbose(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """performance list -v shows times, bound arrangements and attributes."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(runner, tro_file, trs_profile, temp_workspace)
+        self._add_performance(
+            runner,
+            tro_file,
+            "Run",
+            "-a",
+            "trov:InternetIsolation",
+            "-A",
+            "arrangement/0:/mnt/input",
+            "-M",
+            "arrangement/1",
+        )
+        # A second run that only reads: no contributed or attribute sections.
+        self._add_performance(runner, tro_file, "Read-only", "-A", "arrangement/1")
+        result = runner.invoke(
+            cli, ["--declaration", str(tro_file), "performance", "list", "-v"]
+        )
+        assert result.exit_code == 0, result.output
+        out, read_only = result.output.split("Performance(id=trp/1): Read-only\n")
+        assert "Contributed to:" not in read_only
+        assert "Attributes:" not in read_only
+        assert "    - arrangement/1\n" in read_only
+        assert "Performance(id=trp/0): Run" in out
+        assert "Started: 2024-01-01T10:00:00+00:00" in out
+        assert "Ended: 2024-01-01T11:00:00+00:00" in out
+        assert "Accessed:" in out
+        assert "    - arrangement/0 (bound to /mnt/input)" in out
+        assert "Contributed to:" in out
+        assert "    - arrangement/1\n" in out
+        assert "Attributes:" in out
+        assert "    - trov:InternetIsolation" in out
+
+    def test_performance_list_empty(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """performance list on a TRO without performances prints nothing."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(runner, tro_file, trs_profile, temp_workspace)
+        result = runner.invoke(
+            cli, ["--declaration", str(tro_file), "performance", "list"]
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output == ""
+
+    def test_performance_list_declaration_without_extension(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """--declaration resolves to <stem>.jsonld, as for every other command."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(runner, tro_file, trs_profile, temp_workspace)
+        self._add_performance(runner, tro_file, "Run")
+        result = runner.invoke(
+            cli, ["--declaration", str(tmp_path / "test_tro"), "performance", "list"]
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output == "Performance(id=trp/0): Run\n"
+
+    @pytest.mark.parametrize("group", ["performance", "arrangement"])
+    def test_list_missing_declaration(self, runner, tmp_path, group):
+        """list fails instead of printing an empty, freshly created TRO."""
+        missing = tmp_path / "typo.jsonl"
+        result = runner.invoke(cli, ["--declaration", str(missing), group, "list"])
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+        assert not missing.exists()
+
+    @pytest.mark.parametrize("group", ["performance", "arrangement"])
+    def test_list_without_declaration(self, runner, group):
+        """list requires --declaration."""
+        result = runner.invoke(cli, [group, "list"])
+        assert result.exit_code != 0
+        assert "--declaration is required" in result.output
+
 
 class TestExtraContextCLI:
     """Tests for --extra-context CLI option."""

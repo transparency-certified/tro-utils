@@ -151,6 +151,25 @@ class TRO:
     def list_arrangements(self):
         return self.data["@graph"][0]["trov:hasArrangement"]
 
+    def list_performances(self):
+        """Return the performances as JSON-LD dicts, in insertion order.
+
+        Unlike the serialised declaration, ``trov:accessedArrangement`` and
+        ``trov:contributedToArrangement`` are always lists (possibly empty), so
+        callers need not special-case a single binding.
+        """
+        performances = []
+        for perf in self._model.performances:
+            data = perf.to_jsonld()
+            data["trov:accessedArrangement"] = [
+                b.to_jsonld() for b in perf.accessed_arrangements
+            ]
+            data["trov:contributedToArrangement"] = [
+                b.to_jsonld() for b in perf.contributed_to_arrangements
+            ]
+            performances.append(data)
+        return performances
+
     def get_arrangement_path_hash_map(self, arrangement_id):
         arrangement = next(
             (a for a in self._model.arrangements if a.arrangement_id == arrangement_id),

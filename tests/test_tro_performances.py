@@ -252,3 +252,57 @@ class TestTROPerformances:
         )
         perf = tro.data["@graph"][0]["trov:hasPerformance"][0]
         assert perf["trov:customAttr"] == "customValue"
+
+    def test_list_performances(self, temp_workspace, tmp_path, gpg_setup, trs_profile):
+        """list_performances returns the JSON-LD performances, in order."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        assert tro.list_performances() == []
+
+        tro.add_arrangement(str(temp_workspace), comment="A")
+        (temp_workspace / "output.txt").write_text("y")
+        tro.add_arrangement(str(temp_workspace), comment="B")
+        for comment in ("first", "second"):
+            tro.add_performance(
+                start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+                end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+                comment=comment,
+                accessed_arrangement="arrangement/0",
+                modified_arrangement="arrangement/1",
+            )
+
+        performances = tro.list_performances()
+        assert [p["@id"] for p in performances] == ["trp/0", "trp/1"]
+        assert [p["rdfs:comment"] for p in performances] == ["first", "second"]
+        # Single bindings are serialised as a bare dict in the declaration, but
+        # list_performances always returns lists.
+        stored = tro.data["@graph"][0]["trov:hasPerformance"][0]
+        assert isinstance(stored["trov:accessedArrangement"], dict)
+        for p in performances:
+            assert [
+                b["trov:arrangement"]["@id"] for b in p["trov:accessedArrangement"]
+            ] == ["arrangement/0"]
+            assert [
+                b["trov:arrangement"]["@id"] for b in p["trov:contributedToArrangement"]
+            ] == ["arrangement/1"]
+
+    def test_list_performances_without_bindings(
+        self, temp_workspace, tmp_path, gpg_setup, trs_profile
+    ):
+        """Binding keys are present as empty lists when nothing is bound."""
+        tro = create_tro_with_gpg(
+            filepath=str(tmp_path / "test_tro.jsonld"),
+            gpg_setup=gpg_setup,
+            profile=trs_profile,
+        )
+        tro.add_performance(
+            start_time=datetime.datetime(2024, 1, 1, 10, 0, 0),
+            end_time=datetime.datetime(2024, 1, 1, 11, 0, 0),
+            comment="unbound",
+        )
+        (perf,) = tro.list_performances()
+        assert perf["trov:accessedArrangement"] == []
+        assert perf["trov:contributedToArrangement"] == []
