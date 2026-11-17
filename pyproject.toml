@@ -26,7 +26,7 @@ dependencies = [
   "graphviz",
   "rich",
 ]
-requires-python = ">= 3.10"
+requires-python = ">= 3.12"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 classifiers = [
@@ -34,9 +34,10 @@ classifiers = [
   "Intended Audience :: Developers",
   "Topic :: Software Development :: Libraries",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
 ]
 
 [project.scripts]
@@ -69,4 +70,4 @@ tro_utils = ["*.jinja2", "certs/*.pem"]
 write_to = "tro_utils/_version.py"
 
 [tool.black]
-target-version = ["py310", "py311", "py312"]
+target-version = ["py312", "py313", "py314"]
