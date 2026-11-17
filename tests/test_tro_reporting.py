@@ -216,3 +216,35 @@ def test_default_report_collapses_arrangements(tmp_path):
         # GitHub only renders Markdown inside <details> after a blank line.
         assert "<summary>Show artifacts</summary>\n\n| Artifact" in section
         assert section.rstrip().endswith("</details>")
+
+
+def test_default_report_tables_start_new_blocks(tmp_path):
+    """Tables must not continue a paragraph, or pandoc renders them as text.
+
+    GitHub accepts a table right after a line of text, but CommonMark/pandoc
+    need a blank line (or a heading) before it.
+    """
+    import json
+
+    from tro_utils.tro_utils import TRO
+
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("print(1)")
+    profile = tmp_path / "trs.jsonld"
+    profile.write_text(
+        json.dumps({"@id": "https://example.org/trs", "schema:name": "shakuras"})
+    )
+
+    tro = TRO(filepath=str(tmp_path / "t.jsonld"), profile=str(profile))
+    tro.add_arrangement(str(workspace), comment="snap")
+    report = tmp_path / "report.md"
+    tro.generate_report(str(DEFAULT_TEMPLATE), str(report))
+
+    lines = report.read_text().splitlines()
+    for i, line in enumerate(lines[1:], start=1):
+        if line.startswith("|") and not lines[i - 1].startswith("|"):
+            before = lines[i - 1]
+            assert before == "" or before.startswith(
+                "#"
+            ), f"table at line {i + 1} follows text: {before!r}"
