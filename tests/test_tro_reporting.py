@@ -48,8 +48,7 @@ class TestTROReporting:
 
         # Create a simple template
         template_file = tmp_path / "template.jinja2"
-        template_file.write_text(
-            """
+        template_file.write_text("""
 TRO Report
 ==========
 Name: {{ tro.name }}
@@ -58,8 +57,7 @@ Description: {{ tro.description }}
 
 Arrangements: {{ tro.arrangements | length }}
 Performances: {{ tro.trps | length }}
-"""
-        )
+""")
 
         report_file = tmp_path / "report.md"
 
