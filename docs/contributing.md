@@ -66,15 +66,14 @@ Ready to contribute? Here's how to set up `tro_utils` for local development.
 
    Now you can make your changes locally.
 
-5. When you're done making changes, check that your changes pass flake8 and the tests, including testing other Python versions with tox:
+5. When you're done making changes, check that your changes are formatted with black and pass the tests:
 
    ```bash
-   $ flake8 tro_utils tests
+   $ black --check .
    $ pytest
-   $ tox
    ```
 
-   To get flake8 and tox, just pip install them into your virtualenv.
+   To get black and pytest, install the dev extra into your virtualenv: `pip install -e ".[dev]"`.
 
 6. Commit your changes and push your branch to GitHub:
 
@@ -92,7 +91,7 @@ Before you submit a pull request, check that it meets these guidelines:
 
 1. The pull request should include tests.
 2. If the pull request adds functionality, the docs should be updated. Put your new functionality into a function with a docstring, and add the feature to the list in README.md.
-3. The pull request should work for Python 3.5, 3.6, 3.7 and 3.8, and for PyPy. Check https://travis-ci.com/Xarthisius/tro_utils/pull_requests and make sure that the tests pass for all supported Python versions.
+3. The pull request should work for all supported Python versions (3.12 and newer). Check the GitHub Actions results on the pull request and make sure that the tests pass for all of them.
 
 ## Tips
 
@@ -104,12 +103,11 @@ $ pytest tests.test_tro_utils
 
 ## Deploying
 
-A reminder for the maintainers on how to deploy. Make sure all your changes are committed (including an entry in HISTORY.md). Then run:
+A reminder for the maintainers on how to deploy. Make sure all your changes are committed (including an entry in docs/history.md). The version is taken from the git tag by setuptools-scm, so tag the release and push the tag:
 
 ```bash
-$ bump2version patch # possible: major / minor / patch
-$ git push
-$ git push --tags
+$ git tag v0.5.4
+$ git push origin v0.5.4
 ```
 
-Travis will then deploy to PyPI if tests pass.
+GitHub Actions will then publish the tagged release to PyPI.
