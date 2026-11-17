@@ -15,7 +15,7 @@ $ brew install gnupg openssl python3                        # on macOS with Home
 ```
 
 If you only consume TROs — building, inspecting, reporting or `verify-timestamp` —
-GPG is not required; OpenSSL still is.
+GPG is not required; OpenSSL still is. `verify-signature` needs GPG.
 
 ## Stable release
 

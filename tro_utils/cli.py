@@ -10,7 +10,7 @@ from rich.table import Table
 from . import TRPAttribute
 from .models.arrangement import ArtifactArrangement
 from .models.composition import ArtifactComposition
-from .tro_utils import TRO
+from .tro_utils import TRO, normalize_fingerprint
 
 console = Console()
 
@@ -172,7 +172,9 @@ def cli(
     pass
 
 
-@cli.command(help="Verify that TRO is signed and timestamped correctly")
+@cli.command(
+    help="Verify the TRO's timestamp (use verify-signature to check its signature)"
+)
 @click.argument("declaration", type=click.Path(exists=True))
 def verify_timestamp(declaration):
     tro = TRO(
@@ -185,6 +187,140 @@ def verify_timestamp(declaration):
         tro.verify_timestamp()
     except RuntimeError as err:
         raise click.ClickException(str(err)) from err
+
+
+def _normalize_fingerprints(ctx, param, values):
+    try:
+        return tuple(normalize_fingerprint(value) for value in values)
+    except ValueError as err:
+        raise click.BadParameter(str(err)) from err
+
+
+@cli.command(
+    name="verify-signature",
+    help="Verify the TRS signature of the TRO against your GPG keyring",
+)
+@click.argument("declaration", type=click.Path(exists=True))
+@click.option(
+    "--use-embedded-key",
+    is_flag=True,
+    help="Verify with the public key embedded in the TRO instead of your "
+    "keyring. This only shows the TRO is self-consistent, not who signed it.",
+)
+@click.option(
+    "--gnupghome",
+    type=click.Path(exists=True, file_okay=False),
+    help="GnuPG home directory holding the keys you trust",
+)
+@click.option(
+    "--keyring",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Key file (armored or binary), e.g. as published by the TRS, to "
+    "verify with instead of your keyring. Only the keys in it are used.",
+)
+@click.option(
+    "--fingerprint",
+    "fingerprints",
+    multiple=True,
+    callback=_normalize_fingerprints,
+    help="Full fingerprint the signing key must have, e.g. as published by "
+    "the TRS. Can be given more than once.",
+)
+@click.option(
+    "--trs-keys",
+    type=click.Path(exists=True, dir_okay=False),
+    help="TRS key list (JSON, or YAML if it ends in .yaml/.yml) saying which "
+    "keys the TRS signed with and when. The key is judged by it at the time "
+    "of the TRO's trusted timestamp, which is verified too. Uses the key "
+    "embedded in the TRO unless --keyring or --gnupghome is given.",
+)
+def verify_signature(
+    declaration, use_embedded_key, gnupghome, keyring, fingerprints, trs_keys
+):
+    if use_embedded_key + bool(gnupghome) + bool(keyring) > 1:
+        raise click.UsageError(
+            "--use-embedded-key, --gnupghome and --keyring are mutually exclusive"
+        )
+    # TRO derives the .sig path from the stem and always reads <stem>.jsonld,
+    # so any other name would verify a different file than the one given.
+    if pathlib.Path(declaration).suffix != ".jsonld":
+        raise click.BadParameter(
+            f"expected a .jsonld declaration, got {declaration!r}",
+            param_hint="DECLARATION",
+        )
+    try:
+        tro = TRO(filepath=declaration)
+        result = tro.verify_signature(
+            use_embedded_key=use_embedded_key,
+            gnupghome=gnupghome,
+            keyring=keyring,
+            fingerprints=fingerprints,
+            trs_keys=trs_keys,
+        )
+    except (RuntimeError, ValueError, OSError) as err:
+        raise click.ClickException(str(err)) from err
+
+    if result.key_missing and result.used_embedded_key:
+        raise click.ClickException(
+            "The public key embedded in the TRO (trov:publicKey) did not sign "
+            f"it; the signing key is {result.fingerprint}."
+        )
+    if result.key_missing and result.keyring:
+        raise click.ClickException(
+            f"Signing key {result.fingerprint} is not in {result.keyring}."
+        )
+    if result.key_missing:
+        raise click.ClickException(
+            f"Signing key {result.fingerprint} is not in your keyring. Obtain "
+            "the TRS's public key from a source you trust and import it with "
+            "'gpg --import', or use --use-embedded-key to check only that the "
+            "TRO is self-consistent."
+        )
+    if not result.valid:
+        key = f" (key {result.fingerprint})" if result.fingerprint else ""
+        raise click.ClickException(
+            f"Signature verification failed: {result.status}{key}"
+        )
+
+    click.secho("Signature: OK", fg="green")
+    click.echo(f"Signed by: {result.username}")
+    click.echo(f"Key fingerprint: {result.fingerprint}")
+    if result.fingerprint_matches:
+        click.echo("Key confirmed by: the fingerprint you gave")
+    if result.listed_status:
+        click.echo(f"Key listed in: {trs_keys} ({result.listed_status})")
+    if result.timestamp:
+        click.echo(f"Timestamp: {result.timestamp.isoformat()}")
+    if result.keyring:
+        click.echo(f"Key found in: {result.keyring}")
+    elif not result.used_embedded_key:
+        click.echo(f"Key trust: {result.trust}")
+    if not result.trusted and result.used_embedded_key:
+        click.secho(
+            "Warning: verified with the key embedded in the TRO; the key is "
+            "attested only by the TRO itself.",
+            fg="yellow",
+            err=True,
+        )
+    elif not result.trusted:
+        click.secho(
+            "Warning: the signing key is in your keyring, but you have not "
+            "certified it. Confirm its fingerprint against a source you "
+            "trust, such as the TRS's website, then certify it with "
+            f"'gpg --lsign-key {result.fingerprint}' or pass it with "
+            "--fingerprint.",
+            fg="yellow",
+            err=True,
+        )
+    for warning in result.warnings:
+        click.secho(f"Warning: {warning}", fg="yellow", err=True)
+    if result.embedded_key_matches is False:
+        click.secho(
+            "Warning: the public key embedded in the TRO (trov:publicKey) is "
+            "not the key that signed it.",
+            fg="yellow",
+            err=True,
+        )
 
 
 @cli.command(help="Verify the integrity of the TRO")

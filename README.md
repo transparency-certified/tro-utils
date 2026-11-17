@@ -14,7 +14,9 @@ It uses the `Click` library to define commands and options. Here's a summary of 
 
 2. **Commands**: The script defines several commands, each with its own set of options and arguments. The commands include:
 
-   - `verify-timestamp`: Verifies the RFC 3161 timestamp and GPG signature on the TRO.
+   - `verify-timestamp`: Verifies the RFC 3161 timestamp on the TRO.
+
+   - `verify-signature`: Verifies the TRS's GPG signature on the TRO against your keyring. Import the TRS's public key from a source you trust first, or pass the key file the TRS publishes with `--keyring`; `--fingerprint` requires a given signing key. `--trs-keys` checks the key against a list of the TRS's keys with their validity dates, at the time of the TRO's timestamp. `--use-embedded-key` alone only checks that the TRO is self-consistent.
 
    - `verify-package`: Verifies a replication package (directory or `.zip`) against the hashes stored in an arrangement.
 
@@ -59,7 +61,7 @@ $ brew install gnupg openssl python3                        # on macOS with Home
 ```
 
 If you only consume TROs — building, inspecting, reporting or `verify-timestamp` —
-GPG is not required; OpenSSL still is.
+GPG is not required; OpenSSL still is. `verify-signature` needs GPG.
 
 ## Example Usage
 

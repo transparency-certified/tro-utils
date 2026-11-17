@@ -79,7 +79,61 @@ the default `schema:creator` reference.
 ```
 tro-utils verify-timestamp <declaration>
 ```
-Verifies the RFC 3161 timestamp and GPG signature on the TRO.
+Verifies the RFC 3161 timestamp on the TRO.
+
+```
+tro-utils verify-signature <declaration> [--gnupghome DIR | --keyring FILE | --use-embedded-key] [--fingerprint FPR ...] [--trs-keys FILE]
+```
+Verifies the TRS's GPG signature against the declaration as stored on disk.
+How a TRS key comes to be trusted (the TRS's website, a registry, a fingerprint
+published by a journal) is up to you, so tro-utils does not trust the
+`trov:publicKey` embedded in the TRO. Where the key is looked up:
+
+- By default, in your keyring (or in `--gnupghome`). If the key is missing, the
+  command fails and prints its fingerprint; GnuPG is not allowed to fetch it by
+  itself. If the key is in your keyring but you have not certified it
+  (`gpg --lsign-key`), the command warns.
+- `--keyring FILE`: only in a key file you obtained from the TRS, armored
+  (`.asc`) or binary (`.gpg`). Your own keyring is neither used nor changed.
+- `--use-embedded-key`: in the key embedded in the TRO, which on its own only
+  shows that the TRO is self-consistent, not who signed it.
+
+`--fingerprint` gives the fingerprint the signing key must have, as the TRS
+publishes it (spaces are ignored; it can be given more than once, e.g. across
+a key change). A signature by any other key fails. With a fingerprint you
+trust, even `--use-embedded-key` is a sound check, e.g. for a SIVACOR TRO:
+
+```
+tro-utils verify-signature tro/tro-<id>.jsonld --use-embedded-key \
+    --fingerprint "F7DB 4853 9F20 7AD4 612D C408 D8BB 2071 862A FF4A"
+```
+
+`--trs-keys FILE` goes further: it reads a key list saying which keys a TRS
+signed with and when, as JSON, or as YAML if the file ends in `.yaml`/`.yml`.
+The key is judged at the time of the TRO's trusted timestamp (the `.tsr`, which
+is verified too), not by its current OpenPGP state, so a TRO signed before a
+key was retired, or before it was compromised, still verifies. Unless
+`--keyring` or `--gnupghome` is given, the key embedded in the TRO is used,
+since the list vouches for its fingerprint.
+
+```yaml
+format: https://w3id.org/trace/trs-keys/v1
+updated: 2026-11-16T00:00:00Z
+systems:
+  - ids: [https://sivacor.org/]   # every @id the TRS has used in trov:wasAssembledBy
+    name: SIVACOR
+    keys:
+      - fingerprint: F7DB 4853 9F20 7AD4 612D C408 D8BB 2071 862A FF4A
+        valid_from: 2025-11-13      # a bare date is midnight UTC
+        status: current             # or retired (needs valid_until),
+                                    # or compromised (needs compromised_since)
+```
+
+The signature fails if the list has no entry for the TRO's TRS, if the signing
+key is not listed for it, if the timestamp falls outside the key's
+`valid_from`..`valid_until`, or if it is at or after `compromised_since`. A
+key compromised only after the timestamp passes with a warning. Without a
+`.tsr`, only a `current` key passes, with a warning.
 
 ```
 tro-utils verify-package <declaration> <package> [-a ARRANGEMENT] [-s SUBPATH] [-v]
@@ -340,6 +394,10 @@ for p in tro.list_performances():
 tro.save()
 tro.request_timestamp()
 tro.verify_timestamp()   # needs neither a key nor the gpg binary
+tro.verify_signature()   # needs the TRS's key in your keyring
+tro.verify_signature(keyring="trs.asc")   # only the keys in that file
+tro.verify_signature(fingerprints=["<full fingerprint published by the TRS>"])
+tro.verify_signature(trs_keys="trs-keys.yaml")   # judged at the timestamp's time
 
 # Verify a replication package
 result = tro.verify_replication_package(
