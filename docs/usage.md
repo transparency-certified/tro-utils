@@ -325,11 +325,14 @@ tro.add_performance(
     modified_arrangement="arrangement/1",   # str | (id, path) tuple | list | None
 )
 
-# List what has been recorded (JSON-LD dicts, in insertion order)
+# List what has been recorded (JSON-LD dicts, in insertion order).
+# trov:accessedArrangement / trov:contributedToArrangement are always lists here.
 for a in tro.list_arrangements():
     print(a["@id"], a["rdfs:comment"])
 for p in tro.list_performances():
     print(p["@id"], p["rdfs:comment"], p.get("trov:startedAtTime"))
+    for b in p["trov:accessedArrangement"]:
+        print("  accessed", b["trov:arrangement"]["@id"], b.get("trov:boundTo"))
 
 # Save, sign, and timestamp. request_timestamp() attaches trov:publicKey and
 # re-saves the declaration before signing, so the .sig and .tsr always cover the

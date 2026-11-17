@@ -755,6 +755,22 @@ class TestCLIPerformance:
         assert result.exit_code == 0, result.output
         assert result.output == ""
 
+    @pytest.mark.parametrize("group", ["performance", "arrangement"])
+    def test_list_missing_declaration(self, runner, tmp_path, group):
+        """list fails instead of printing an empty, freshly created TRO."""
+        missing = tmp_path / "typo.jsonl"
+        result = runner.invoke(cli, ["--declaration", str(missing), group, "list"])
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+        assert not missing.exists()
+
+    @pytest.mark.parametrize("group", ["performance", "arrangement"])
+    def test_list_without_declaration(self, runner, group):
+        """list requires --declaration."""
+        result = runner.invoke(cli, [group, "list"])
+        assert result.exit_code != 0
+        assert "--declaration is required" in result.output
+
 
 class TestExtraContextCLI:
     """Tests for --extra-context CLI option."""
