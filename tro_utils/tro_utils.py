@@ -28,7 +28,8 @@ from .models.trs import TrustedResearchSystem
 from .trs_keys import TRSKeyList, normalize_fingerprint
 
 #: TRACE logo shown in report headers, bundled so reports don't depend on a
-#: remote URL. Canonical copy:
+#: remote URL. Reduced to a 16-color palette to keep reports small; the
+#: full-color original is at
 #: https://transparency-certified.github.io/img/logo/trace-logo.png
 _LOGO = importlib.resources.files(__package__) / "static" / "trace-logo.png"
 
