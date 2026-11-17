@@ -768,21 +768,38 @@ class TestCLIPerformance:
         assert result.exit_code == 0, result.output
         assert result.output == "Performance(id=trp/0): Run\n"
 
-    @pytest.mark.parametrize("group", ["performance", "arrangement"])
-    def test_list_missing_declaration(self, runner, tmp_path, group):
-        """list fails instead of printing an empty, freshly created TRO."""
-        missing = tmp_path / "typo.jsonl"
-        result = runner.invoke(cli, ["--declaration", str(missing), group, "list"])
-        assert result.exit_code != 0
-        assert "does not exist" in result.output
-        assert not missing.exists()
 
-    @pytest.mark.parametrize("group", ["performance", "arrangement"])
-    def test_list_without_declaration(self, runner, group):
-        """list requires --declaration."""
-        result = runner.invoke(cli, [group, "list"])
-        assert result.exit_code != 0
-        assert "--declaration is required" in result.output
+#: Commands that only make sense on an existing declaration.
+_NEEDS_DECLARATION = [
+    ["performance", "list"],
+    ["arrangement", "list"],
+    ["composition", "info"],
+    ["report", "-t", "default", "-o", "report.md"],
+    ["sign"],
+]
+
+
+@pytest.mark.parametrize("command", _NEEDS_DECLARATION, ids=" ".join)
+def test_missing_declaration(runner, tmp_path, monkeypatch, command):
+    """Fail instead of acting on an empty, freshly created TRO (#30)."""
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "typo.jsonl"
+    result = runner.invoke(cli, ["--declaration", str(missing), *command])
+    assert result.exit_code != 0
+    assert "does not exist" in result.output
+    assert not missing.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("command", _NEEDS_DECLARATION, ids=" ".join)
+def test_without_declaration(runner, tmp_path, monkeypatch, command):
+    """--declaration is required, and the error says where it goes (#30)."""
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(cli, command)
+    assert result.exit_code != 0
+    assert "--declaration is required" in result.output
+    assert "tro-utils --declaration FILE COMMAND" in result.output
+    assert list(tmp_path.iterdir()) == []
 
 
 class TestExtraContextCLI:
