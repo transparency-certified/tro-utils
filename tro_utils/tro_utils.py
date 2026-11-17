@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import datetime
 import hashlib
+import importlib.resources
 import json
 import os
 import pathlib
@@ -25,6 +26,11 @@ from .models import TransparentResearchObject
 from .models.agent import ORGANIZATION, Agent
 from .models.trs import TrustedResearchSystem
 from .trs_keys import TRSKeyList, normalize_fingerprint
+
+#: TRACE logo shown in report headers, bundled so reports don't depend on a
+#: remote URL. Canonical copy:
+#: https://transparency-certified.github.io/img/logo/trace-logo.png
+_LOGO = importlib.resources.files(__package__) / "static" / "trace-logo.png"
 
 GPG_HOME = os.environ.get("GPG_HOME")
 
@@ -705,6 +711,7 @@ class TRO:
         data = {
             **graph,
             "workflow_diagram": png_base64,
+            "logo": base64.b64encode(_LOGO.read_bytes()).decode("utf-8"),
             "trps": [
                 {
                     "id": perf.performance_id,

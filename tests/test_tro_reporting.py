@@ -160,3 +160,28 @@ class TestTRSPropertiesInReport:
             assert f"| {label}" in trace
             row = next(l for l in trace.splitlines() if l.startswith(f"| {label}"))
             assert row.split("|")[2].strip(), f"{label} rendered blank: {row!r}"
+
+
+def test_default_report_embeds_logo(tmp_path):
+    """The header logo is inlined from the package, not linked remotely (#39)."""
+    import base64
+    import json
+
+    from tro_utils.tro_utils import TRO
+
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("print(1)")
+    profile = tmp_path / "trs.jsonld"
+    profile.write_text(json.dumps({"@id": "https://example.org/trs"}))
+
+    tro = TRO(filepath=str(tmp_path / "t.jsonld"), profile=str(profile))
+    tro.add_arrangement(str(workspace), comment="snap")
+    report = tmp_path / "report.md"
+    tro.generate_report(str(DEFAULT_TEMPLATE), str(report))
+
+    header = report.read_text().splitlines()[0]
+    prefix = '<img src="data:image/png;base64,'
+    assert prefix in header
+    encoded = header.split(prefix)[1].split('"')[0]
+    assert base64.b64decode(encoded).startswith(b"\x89PNG\r\n\x1a\n")
