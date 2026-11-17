@@ -1019,3 +1019,13 @@ class TestCreatorType:
     def test_cli_help_shows_creator_type(self, runner):
         result = runner.invoke(cli, ["--help"])
         assert "--tro-creator-type" in result.output
+
+
+@pytest.mark.parametrize("flag", ["--version", "-v"])
+def test_cli_version(runner, flag):
+    """``--version`` / ``-v`` should print the package version and exit."""
+    from tro_utils import __version__
+
+    result = runner.invoke(cli, [flag])
+    assert result.exit_code == 0
+    assert result.output.strip() == f"tro-utils, version {__version__}"
