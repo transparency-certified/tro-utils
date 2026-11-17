@@ -388,11 +388,13 @@ class TRO:
                 trs_signature = fp.read()
         except FileNotFoundError:
             raise RuntimeError("Signature file does not exist")
+        # Hash the declaration as stored, as verify_signature() does: the
+        # re-serialized model need not match the bytes that were timestamped.
+        with open(self.tro_filename, "rb") as fp:
+            declaration = fp.read()
 
         ts_data = {
-            "tro_declaration": hashlib.sha512(
-                json.dumps(self.data, indent=2, sort_keys=True).encode("utf-8")
-            ).hexdigest(),
+            "tro_declaration": hashlib.sha512(declaration).hexdigest(),
             "trs_signature": hashlib.sha512(trs_signature).hexdigest(),
         }
         tsr_payload = json.dumps(ts_data, indent=2, sort_keys=True).encode()
