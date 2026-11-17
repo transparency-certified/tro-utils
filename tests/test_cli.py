@@ -755,6 +755,19 @@ class TestCLIPerformance:
         assert result.exit_code == 0, result.output
         assert result.output == ""
 
+    def test_performance_list_declaration_without_extension(
+        self, runner, tmp_path, temp_workspace, trs_profile
+    ):
+        """--declaration resolves to <stem>.jsonld, as for every other command."""
+        tro_file = tmp_path / "test_tro.jsonld"
+        self._setup_tro_with_arrangements(runner, tro_file, trs_profile, temp_workspace)
+        self._add_performance(runner, tro_file, "Run")
+        result = runner.invoke(
+            cli, ["--declaration", str(tmp_path / "test_tro"), "performance", "list"]
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output == "Performance(id=trp/0): Run\n"
+
     @pytest.mark.parametrize("group", ["performance", "arrangement"])
     def test_list_missing_declaration(self, runner, tmp_path, group):
         """list fails instead of printing an empty, freshly created TRO."""

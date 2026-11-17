@@ -394,9 +394,12 @@ def _load_existing_tro(declaration):
     """Load a declaration for a read-only command, refusing to invent an empty one."""
     if declaration is None:
         raise click.UsageError("--declaration is required.")
-    if not pathlib.Path(declaration).exists():
-        raise click.ClickException(f"Declaration file '{declaration}' does not exist.")
-    return TRO(filepath=declaration)
+    tro = TRO(filepath=declaration)
+    if not pathlib.Path(tro.tro_filename).exists():
+        raise click.ClickException(
+            f"Declaration file '{tro.tro_filename}' does not exist."
+        )
+    return tro
 
 
 @arrangement.command(name="list", help="List available arrangements in the TRO")
