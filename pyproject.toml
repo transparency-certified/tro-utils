@@ -63,7 +63,7 @@ dev = [
 ]
 
 [tool.setuptools.package-data]
-tro_utils = ["*.jinja2", "certs/*.pem"]
+tro_utils = ["*.jinja2", "certs/*.pem", "static/*.png"]
 
 [tool.setuptools_scm]
 write_to = "tro_utils/_version.py"
