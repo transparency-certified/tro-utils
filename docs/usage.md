@@ -79,7 +79,11 @@ the default `schema:creator` reference.
 ```
 tro-utils verify-timestamp <declaration>
 ```
-Verifies the RFC 3161 timestamp on the TRO.
+Verifies the RFC 3161 timestamp on the TRO against the declaration and `.sig`
+as stored on disk. FreeTSA's certificates ship with tro-utils, so nothing is
+downloaded, and they are checked as of the time in the timestamp: a timestamp
+stays valid after FreeTSA replaces the certificate that signed it, or the
+certificate expires.
 
 ```
 tro-utils verify-signature <declaration> [--gnupghome DIR | --keyring FILE | --use-embedded-key] [--fingerprint FPR ...] [--trs-keys FILE]

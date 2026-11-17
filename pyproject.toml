@@ -17,7 +17,6 @@ dynamic = ["version"]
 dependencies = [
   "Click>=7.0",
   "jinja2",
-  "requests",
   "packaging",
   "python-gnupg",
   "python-magic",
@@ -62,7 +61,7 @@ dev = [
 ]
 
 [tool.setuptools.package-data]
-tro_utils = ["*.jinja2"]
+tro_utils = ["*.jinja2", "certs/*.pem"]
 
 [tool.setuptools_scm]
 write_to = "tro_utils/_version.py"

@@ -18,12 +18,9 @@ import tempfile
 from dataclasses import dataclass, field
 
 from jinja2 import Template
-import requests
-import rfc3161ng
 import graphviz
-from pyasn1.codec.der import encoder
 
-from . import __version__
+from . import __version__, tsa
 from .models import TransparentResearchObject
 from .models.agent import ORGANIZATION, Agent
 from .models.trs import TrustedResearchSystem
@@ -330,7 +327,6 @@ class TRO:
         """
         self.attach_public_key()
         self.save()
-        rt = rfc3161ng.RemoteTimestamper("https://freetsa.org/tsr", hashname="sha512")
         ts_data = {
             "tro_declaration": hashlib.sha512(
                 json.dumps(self.data, indent=2, sort_keys=True).encode("utf-8")
@@ -340,9 +336,9 @@ class TRO:
             ).hexdigest(),
         }
         tsr_payload = json.dumps(ts_data, indent=2, sort_keys=True).encode()
-        tsr = rt(data=tsr_payload, return_tsr=True)
+        tsr = tsa.request_token(tsr_payload)
         with open(self.tsr_filename, "wb") as fs:
-            fs.write(encoder.encode(tsr))
+            fs.write(tsr)
 
     def get_composition_info(self):
         return self.data["@graph"][0]["trov:hasComposition"]
@@ -398,63 +394,21 @@ class TRO:
             "trs_signature": hashlib.sha512(trs_signature).hexdigest(),
         }
         tsr_payload = json.dumps(ts_data, indent=2, sort_keys=True).encode()
+        if not os.path.exists(self.tsr_filename):
+            raise RuntimeError("Timestamp file does not exist")
 
-        with (
-            tempfile.NamedTemporaryFile() as data_f,
-            tempfile.NamedTemporaryFile() as cafile_f,
-            tempfile.NamedTemporaryFile() as tsacert_f,
-        ):
-            data_f.write(tsr_payload)
-            data_f.flush()
-            data_f.seek(0)
-
-            response = requests.get(
-                "https://freetsa.org/files/tsa.crt", allow_redirects=True
-            )
-            tsacert_f.write(response.content)
-            tsacert_f.flush()
-            tsacert_f.seek(0)
-
-            response = requests.get(
-                "https://freetsa.org/files/cacert.pem", allow_redirects=True
-            )
-            cafile_f.write(response.content)
-            cafile_f.flush()
-            cafile_f.seek(0)
-
-            args = [
-                "openssl",
-                "ts",
-                "-verify",
-                "-data",
-                data_f.name,
-                "-in",
-                self.tsr_filename,
-                "-CAfile",
-                cafile_f.name,
-                "-untrusted",
-                tsacert_f.name,
-            ]
-            try:
-                if quiet:
-                    subprocess.check_call(
-                        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                    )
-                else:
-                    subprocess.check_call(args)
-            except subprocess.CalledProcessError as err:
-                mismatch = self.created_with_mismatch()
-                if mismatch is None:
-                    raise
-                raise RuntimeError(
-                    f"Timestamp verification failed. {mismatch}"
-                ) from err
+        try:
+            tsa.verify_token(tsr_payload, self.tsr_filename, quiet=quiet)
+        except subprocess.CalledProcessError as err:
+            mismatch = self.created_with_mismatch()
+            if mismatch is None:
+                raise
+            raise RuntimeError(f"Timestamp verification failed. {mismatch}") from err
 
     def timestamp_time(self):
         """Return the time in the TRO's timestamp, without verifying it."""
         with open(self.tsr_filename, "rb") as fp:
-            response = rfc3161ng.decode_timestamp_response(fp.read())
-        return rfc3161ng.get_timestamp(response.time_stamp_token, naive=False)
+            return tsa.token_time(fp.read())
 
     def verify_signature(
         self,
