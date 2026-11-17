@@ -29,12 +29,14 @@ def _write_tsr(path):
 class TestTROTimestamping:
     """Test TRO timestamping operations."""
 
+    @patch("tro_utils.tsa.verify_token")
     @patch("tro_utils.tsa.rfc3161ng.RemoteTimestamper")
     @patch("tro_utils.tsa.encoder.encode")
     def test_request_timestamp(
         self,
         mock_encode,
         mock_timestamper,
+        mock_verify_token,
         temp_workspace,
         tmp_path,
         gpg_setup,
@@ -70,6 +72,10 @@ class TestTROTimestamping:
             "https://freetsa.org/tsr", hashname="sha512", include_tsa_certificate=True
         )
         mock_ts_instance.assert_called_once()
+        # The response is checked before it is saved
+        mock_verify_token.assert_called_once_with(
+            mock_ts_instance.call_args.kwargs["data"], b"encoded_tsr_data", quiet=True
+        )
 
         # Verify TSR file was created
         assert os.path.exists(tro.tsr_filename)
@@ -329,3 +335,19 @@ class TestCreatedWithMismatch:
 
         assert result.exit_code == 1
         assert "pip install tro-utils==0.4.5" in result.output
+
+    @pytest.mark.parametrize(
+        "response",
+        [b"not a timestamp", (TSA_DATA / "freetsa-2026.tsr").read_bytes() + b"\0"],
+        ids=["other data", "trailing data"],
+    )
+    def test_cli_reports_unreadable_response(self, tmp_path, trs_profile, response):
+        """A .tsr that is not a timestamp gives an error, not a traceback."""
+        tro = _saved_tro(tmp_path, trs_profile, _created_with(__version__))
+        (tmp_path / "test_tro.tsr").write_bytes(response)
+
+        result = CliRunner().invoke(cli, ["verify-timestamp", tro.tro_filename])
+
+        assert result.exit_code == 1
+        assert "not an RFC 3161 response" in result.output
+        assert isinstance(result.exception, SystemExit)

@@ -13,8 +13,11 @@ These run openssl on real FreeTSA responses:
 import datetime
 import pathlib
 import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
+import rfc3161ng
+from pyasn1.codec.der import encoder
 
 from tro_utils import tsa
 
@@ -26,8 +29,24 @@ def _payload(name):
     return (TSA_DATA / f"{name}.payload").read_bytes()
 
 
-def _tsr(name):
-    return str(TSA_DATA / f"{name}.tsr")
+def _response(name):
+    return (TSA_DATA / f"{name}.tsr").read_bytes()
+
+
+def _rejection():
+    """A response in which the TSA refuses the request: no token."""
+    status = rfc3161ng.PKIStatusInfo()
+    status["status"] = 2  # rejection
+    response = rfc3161ng.TimeStampResp()
+    response["status"] = status
+    return encoder.encode(response)
+
+
+@pytest.fixture
+def old_openssl():
+    """Pretend openssl is one whose ts -verify has no -attime."""
+    with patch.object(tsa, "_openssl_supports_attime", return_value=False):
+        yield
 
 
 @pytest.mark.parametrize(
@@ -38,30 +57,58 @@ def _tsr(name):
     ],
 )
 def test_token_time(name, signed_at):
-    with open(_tsr(name), "rb") as fp:
-        assert tsa.token_time(fp.read()) == signed_at
+    assert tsa.token_time(_response(name)) == signed_at
 
 
-def test_token_time_rejects_other_data():
+@pytest.mark.parametrize(
+    "response",
+    [
+        b"not a timestamp",
+        _response("freetsa-2026") + b"\0",  # trailing data
+        _rejection(),
+    ],
+    ids=["other data", "trailing data", "rejection"],
+)
+def test_token_time_rejects(response):
     with pytest.raises(RuntimeError, match="not an RFC 3161 response"):
-        tsa.token_time(b"not a timestamp")
+        tsa.token_time(response)
 
 
 @pytest.mark.parametrize("name", ["freetsa-2025", "freetsa-2026"])
 def test_verify(name):
-    tsa.verify_token(_payload(name), _tsr(name), quiet=True)
+    tsa.verify_token(_payload(name), _response(name), quiet=True)
 
 
-def test_verify_after_certificate_expired():
+def test_verify_after_certificate_expired(old_openssl):
     """A token stays valid after its signing certificate has expired.
 
     The certificate that signed freetsa-2025 is no longer served by FreeTSA
     and expired on 2026-03-11; it is found among the bundled certificates and
-    checked as of the token's time.
+    checked as of the token's time. An openssl that can only check it as of
+    now says why it may have failed.
     """
-    with pytest.raises(subprocess.CalledProcessError):
-        _verify_now("freetsa-2025")
-    tsa.verify_token(_payload("freetsa-2025"), _tsr("freetsa-2025"), quiet=True)
+    with pytest.raises(RuntimeError, match="cannot check a timestamp as of the time"):
+        tsa.verify_token(_payload("freetsa-2025"), _response("freetsa-2025"))
+
+
+def test_old_openssl_still_verifies_current_certificate(old_openssl):
+    tsa.verify_token(_payload("freetsa-2026"), _response("freetsa-2026"), quiet=True)
+
+
+def test_this_openssl_supports_attime():
+    """The rest of these tests assume an openssl that checks as of a time."""
+    tsa._openssl_supports_attime.cache_clear()
+    assert tsa._openssl_supports_attime()
+
+
+def test_detects_openssl_without_attime():
+    usage = MagicMock(stdout="", stderr="usage: ts -verify [-untrusted file]\n")
+    tsa._openssl_supports_attime.cache_clear()
+    try:
+        with patch.object(tsa.subprocess, "run", return_value=usage):
+            assert not tsa._openssl_supports_attime()
+    finally:
+        tsa._openssl_supports_attime.cache_clear()
 
 
 def test_verify_without_bundled_signing_certificates(monkeypatch):
@@ -69,44 +116,62 @@ def test_verify_without_bundled_signing_certificates(monkeypatch):
     # openssl refuses an -untrusted file without certificates
     monkeypatch.setattr(tsa, "TSA_CERTIFICATES", tsa.ROOT_CERTIFICATE)
 
-    tsa.verify_token(_payload("freetsa-2026"), _tsr("freetsa-2026"), quiet=True)
+    tsa.verify_token(_payload("freetsa-2026"), _response("freetsa-2026"), quiet=True)
     with pytest.raises(subprocess.CalledProcessError):
-        tsa.verify_token(_payload("freetsa-2025"), _tsr("freetsa-2025"), quiet=True)
+        tsa.verify_token(
+            _payload("freetsa-2025"), _response("freetsa-2025"), quiet=True
+        )
 
 
 @pytest.mark.parametrize("name", ["freetsa-2025", "freetsa-2026"])
 def test_verify_rejects_other_payload(name):
     with pytest.raises(subprocess.CalledProcessError):
-        tsa.verify_token(_payload(name) + b" ", _tsr(name), quiet=True)
+        tsa.verify_token(_payload(name) + b" ", _response(name), quiet=True)
 
 
-def test_verify_rejects_untrusted_root(tmp_path, monkeypatch):
+def test_verify_rejects_untrusted_root(monkeypatch):
     """The signing certificates alone are not trusted."""
     monkeypatch.setattr(tsa, "ROOT_CERTIFICATE", tsa.TSA_CERTIFICATES)
 
     with pytest.raises(subprocess.CalledProcessError):
-        tsa.verify_token(_payload("freetsa-2026"), _tsr("freetsa-2026"), quiet=True)
+        tsa.verify_token(
+            _payload("freetsa-2026"), _response("freetsa-2026"), quiet=True
+        )
 
 
-def test_verify_rejects_other_data(tmp_path):
-    tsr = tmp_path / "bad.tsr"
-    tsr.write_bytes(b"not a timestamp")
-
+def test_verify_rejects_rejection():
     with pytest.raises(RuntimeError, match="not an RFC 3161 response"):
-        tsa.verify_token(_payload("freetsa-2026"), str(tsr), quiet=True)
+        tsa.verify_token(_payload("freetsa-2026"), _rejection(), quiet=True)
+
+
+def _timestamper_returning(response):
+    """Patch FreeTSA to answer every request with *response*."""
+    decoded = rfc3161ng.decode_timestamp_response(response)
+    return patch.object(
+        tsa.rfc3161ng,
+        "RemoteTimestamper",
+        return_value=MagicMock(return_value=decoded),
+    )
+
+
+def test_request_token():
+    with _timestamper_returning(_response("freetsa-2026")) as timestamper:
+        response = tsa.request_token(_payload("freetsa-2026"))
+
+    assert response == _response("freetsa-2026")
+    timestamper.assert_called_once_with(
+        "https://freetsa.org/tsr", hashname="sha512", include_tsa_certificate=True
+    )
+
+
+def test_request_token_rejects_token_for_other_data():
+    with (
+        _timestamper_returning(_response("freetsa-2026")),
+        pytest.raises(RuntimeError, match="does not verify"),
+    ):
+        tsa.request_token(_payload("freetsa-2025"))
 
 
 def test_certificates_are_installed():
     for resource in (tsa.ROOT_CERTIFICATE, tsa.TSA_CERTIFICATES):
         assert "-----BEGIN CERTIFICATE-----" in resource.read_text()
-
-
-def _verify_now(name):
-    """Verify as tro-utils did before: as of the current time."""
-    with (
-        tsa.importlib.resources.as_file(tsa.ROOT_CERTIFICATE) as root,
-        tsa.importlib.resources.as_file(tsa.TSA_CERTIFICATES) as untrusted,
-    ):
-        args = ["openssl", "ts", "-verify", "-data", str(TSA_DATA / f"{name}.payload")]
-        args += ["-in", _tsr(name), "-CAfile", str(root), "-untrusted", str(untrusted)]
-        subprocess.run(args, check=True, capture_output=True)

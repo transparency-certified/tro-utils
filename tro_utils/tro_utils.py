@@ -394,11 +394,14 @@ class TRO:
             "trs_signature": hashlib.sha512(trs_signature).hexdigest(),
         }
         tsr_payload = json.dumps(ts_data, indent=2, sort_keys=True).encode()
-        if not os.path.exists(self.tsr_filename):
+        try:
+            with open(self.tsr_filename, "rb") as fp:
+                response = fp.read()
+        except FileNotFoundError:
             raise RuntimeError("Timestamp file does not exist")
 
         try:
-            tsa.verify_token(tsr_payload, self.tsr_filename, quiet=quiet)
+            tsa.verify_token(tsr_payload, response, quiet=quiet)
         except subprocess.CalledProcessError as err:
             mismatch = self.created_with_mismatch()
             if mismatch is None:

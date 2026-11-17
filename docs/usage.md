@@ -83,7 +83,12 @@ Verifies the RFC 3161 timestamp on the TRO against the declaration and `.sig`
 as stored on disk. FreeTSA's certificates ship with tro-utils, so nothing is
 downloaded, and they are checked as of the time in the timestamp: a timestamp
 stays valid after FreeTSA replaces the certificate that signed it, or the
-certificate expires.
+certificate expires. That time is FreeTSA's word, and revocation is not
+checked, so this relies on FreeTSA keeping every key it has used private:
+whoever obtained a retired key could make timestamps dated while its
+certificate was valid. Checking a timestamp as of its own time needs OpenSSL
+1.1.1 or later; LibreSSL, which macOS ships as `openssl`, checks it as of
+now, so a timestamp whose certificate has expired fails there.
 
 ```
 tro-utils verify-signature <declaration> [--gnupghome DIR | --keyring FILE | --use-embedded-key] [--fingerprint FPR ...] [--trs-keys FILE]
