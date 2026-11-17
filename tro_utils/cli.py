@@ -433,10 +433,7 @@ def performance():
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed information")
 @click.pass_context
 def info(ctx, verbose):
-    declaration = ctx.parent.parent.params.get("declaration")
-    tro = TRO(
-        filepath=declaration,
-    )
+    tro = _load_existing_tro(ctx.parent.parent.params.get("declaration"))
     artifact_locs: dict = {}
     if verbose:
         for arr in tro._model.arrangements:
@@ -527,11 +524,14 @@ def add(ctx, directory, ignore_dir, comment, from_snapshot):
     tro.save()
 
 
-def _load_existing_tro(declaration):
-    """Load a declaration for a read-only command, refusing to invent an empty one."""
+def _load_existing_tro(declaration, **kwargs):
+    """Load the declaration a command needs, refusing to invent an empty one."""
     if declaration is None:
-        raise click.UsageError("--declaration is required.")
-    tro = TRO(filepath=declaration)
+        raise click.UsageError(
+            "--declaration is required. It is a global option, so it goes "
+            "before the command: tro-utils --declaration FILE COMMAND ..."
+        )
+    tro = TRO(filepath=declaration, **kwargs)
     if not pathlib.Path(tro.tro_filename).exists():
         raise click.ClickException(
             f"Declaration file '{tro.tro_filename}' does not exist."
@@ -559,8 +559,8 @@ def sign(ctx):
     gpg_fingerprint = ctx.parent.params.get("gpg_fingerprint")
     gpg_passphrase = ctx.parent.params.get("gpg_passphrase")
     profile = ctx.parent.params.get("profile")
-    tro = TRO(
-        filepath=declaration,
+    tro = _load_existing_tro(
+        declaration,
         gpg_fingerprint=gpg_fingerprint,
         gpg_passphrase=gpg_passphrase,
         profile=profile,
@@ -585,9 +585,7 @@ def generate_report(ctx, template, output):
     if template in _TEMPLATES:
         template = pathlib.Path(__file__).parent / _TEMPLATES[template]["filename"]
         template = str(template.resolve())
-    tro = TRO(
-        filepath=declaration,
-    )
+    tro = _load_existing_tro(declaration)
     tro.generate_report(template, output)
 
 
